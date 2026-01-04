@@ -1,0 +1,19 @@
+{
+  "name": "guohe-abd",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@yume-chan/adb": "^2.3.1",
+    "@yume-chan/stream-extra": "^2.1.0",
+    "axios": "^1.13.2",
+    "child_process": "^1.0.2",
+    "cors": "^2.8.5",
+    "express": "^5.2.1"
+  }
+}

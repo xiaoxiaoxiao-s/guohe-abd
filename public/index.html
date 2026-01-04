@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>iOS 云真机控制台</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #202124;
+        display: flex;
+        flex-direction: row;
+        align-items: flex-start;
+        justify-content: center;
+        height: 100vh;
+        color: white;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        gap: 20px;
+        padding: 20px;
+        box-sizing: border-box;
+      }
+
+      h2 {
+        margin: 0 0 20px 0;
+        text-align: center;
+      }
+
+      .left-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 1;
+        max-width: 60%;
+      }
+
+      .right-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        flex: 0 0 auto;
+        min-width: 300px;
+      }
+
+      .phone-wrapper {
+        position: relative;
+        line-height: 0;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+      }
+
+      #screen-view {
+        display: block;
+        object-fit: contain;
+        max-height: 90vh;
+        max-width: 100%;
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-drag: none;
+        border-radius: 18px;
+      }
+
+      /* 新增：虚拟按钮栏样式 */
+      .control-bar {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        width: 100%;
+      }
+
+      .control-section {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 100%;
+      }
+
+      .control-section-title {
+        font-size: 14px;
+        color: #aaa;
+        margin-bottom: 5px;
+        text-align: center;
+      }
+
+      /* 方向滑动按钮组 */
+      .swipe-controls {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        gap: 5px;
+        width: 180px;
+        height: 180px;
+        margin: 0 auto;
+      }
+
+      .swipe-btn {
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        background: #444;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 24px;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .swipe-btn:hover {
+        background: #666;
+      }
+
+      .swipe-btn:active {
+        background: #888;
+        transform: scale(0.9);
+      }
+
+      .swipe-btn-up {
+        grid-column: 2;
+        grid-row: 1;
+      }
+
+      .swipe-btn-down {
+        grid-column: 2;
+        grid-row: 3;
+      }
+
+      .swipe-btn-left {
+        grid-column: 1;
+        grid-row: 2;
+      }
+
+      .swipe-btn-right {
+        grid-column: 3;
+        grid-row: 2;
+      }
+
+      .btn {
+        padding: 10px 20px;
+        background: #444;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background 0.2s;
+        width: 100%;
+      }
+
+      .btn:hover {
+        background: #666;
+      }
+      .btn:active {
+        background: #888;
+        transform: scale(0.95);
+      }
+      .btn-home {
+        background: #2196f3;
+      } /* 蓝色 Home 键 */
+
+      .status-bar {
+        margin-top: 15px;
+        font-size: 14px;
+        color: #aaa;
+        text-align: center;
+        width: 100%;
+      }
+
+      /* 响应式设计 */
+      @media (max-width: 1024px) {
+        body {
+          flex-direction: column;
+          padding: 10px;
+        }
+
+        .left-panel {
+          max-width: 100%;
+        }
+
+        .right-panel {
+          min-width: 100%;
+          margin-top: 20px;
+        }
+
+        .control-bar {
+          flex-direction: row;
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+
+        .control-section {
+          min-width: 200px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="left-panel">
+      <h2>📱 iOS Remote Control</h2>
+      <div class="phone-wrapper">
+        <img id="screen-view" src="/api/stream" alt="等待连接手机画面..." />
+      </div>
+      <div class="status-bar">
+        状态: <span id="status-text">正在连接视频流...</span>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <div class="control-bar">
+        <div class="control-section">
+          <div class="control-section-title">系统操作</div>
+          <button class="btn btn-home" onclick="goHome()">
+            🏠 Home (回桌面)
+          </button>
+          <button class="btn" onclick="goAppSwitcher()">🗂 多任务</button>
+        </div>
+
+        <div class="control-section">
+          <div class="control-section-title">方向滑动</div>
+          <div class="swipe-controls">
+            <button
+              class="swipe-btn swipe-btn-up"
+              onclick="swipeDirection('up')"
+              title="向上滑动"
+            >
+              ↑
+            </button>
+            <button
+              class="swipe-btn swipe-btn-left"
+              onclick="swipeDirection('left')"
+              title="向左滑动"
+            >
+              ←
+            </button>
+            <button
+              class="swipe-btn swipe-btn-right"
+              onclick="swipeDirection('right')"
+              title="向右滑动"
+            >
+              →
+            </button>
+            <button
+              class="swipe-btn swipe-btn-down"
+              onclick="swipeDirection('down')"
+              title="向下滑动"
+            >
+              ↓
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const screenImg = document.getElementById("screen-view");
+      const statusText = document.getElementById("status-text");
+
+      screenImg.onload = () => {
+        statusText.innerText = "✅ 在线 | 点击 / 快速滑动 / 慢速拖拽";
+        statusText.style.color = "#4caf50";
+      };
+      screenImg.onerror = () => {
+        statusText.innerText = "❌ 连接断开";
+        statusText.style.color = "#f44336";
+      };
+
+      // ===============================================
+      // 智能交互逻辑
+      // ===============================================
+      let startX = 0,
+        startY = 0;
+      let startTime = 0;
+      let isDragging = false;
+
+      // 1. 鼠标按下
+      screenImg.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        isDragging = true;
+        const rect = screenImg.getBoundingClientRect();
+        startX = e.clientX - rect.left;
+        startY = e.clientY - rect.top;
+        // 记录按下时间
+        startTime = new Date().getTime();
+      });
+
+      // 2. 鼠标松开 (智能判断意图)
+      screenImg.addEventListener("mouseup", async (e) => {
+        if (!isDragging) return;
+        isDragging = false;
+
+        const rect = screenImg.getBoundingClientRect();
+        const endX = e.clientX - rect.left;
+        const endY = e.clientY - rect.top;
+        const viewWidth = rect.width;
+        const viewHeight = rect.height;
+
+        // 计算耗时
+        const endTime = new Date().getTime();
+        const timeDiff = endTime - startTime; // 毫秒
+
+        // 计算距离
+        const diffX = Math.abs(endX - startX);
+        const diffY = Math.abs(endY - startY);
+        const moveDistance = Math.sqrt(diffX * diffX + diffY * diffY);
+
+        // --- 逻辑分支 ---
+
+        // 1. 如果移动距离很小 -> 点击 (Tap)
+        if (moveDistance < 10) {
+          console.log("👆 触发点击");
+          performAction("/api/tap", {
+            x: endX,
+            y: endY,
+            viewWidth,
+            viewHeight,
+          });
+          return;
+        }
+
+        // 2. 如果移动距离大，根据耗时判断是 Swipe 还是 Drag
+        if (timeDiff < 500) {
+          // 操作快 (小于0.5秒) -> 滑动/翻页
+          console.log("💨 触发快速滑动 (Swipe)");
+          performAction("/api/swipe", {
+            startX,
+            startY,
+            endX,
+            endY,
+            viewWidth,
+            viewHeight,
+          });
+        } else {
+          // 操作慢 (大于0.5秒) -> 拖拽/移动图标
+          // 前端提示用户
+          statusText.innerText = "✊ 检测到慢速操作，正在执行拖拽...";
+          setTimeout(() => (statusText.innerText = "✅ 在线"), 2000);
+
+          console.log("✊ 触发慢速拖拽 (Drag)");
+          performAction("/api/drag", {
+            startX,
+            startY,
+            endX,
+            endY,
+            viewWidth,
+            viewHeight,
+          });
+        }
+      });
+
+      screenImg.addEventListener("mouseleave", () => (isDragging = false));
+
+      // 优化：使用 fire-and-forget 模式，不等待响应
+      function performAction(url, data) {
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        }).catch((err) => {
+          console.error("操作失败", err);
+        });
+        // 不等待响应，立即返回
+      }
+
+      // 新增：Home 键功能
+      async function goHome() {
+        console.log("🏠 按下 Home 键");
+        await performAction("/api/home", {});
+      }
+
+      // 新增：多任务功能 (原理：Home 键双击，或者上滑悬停)
+      // 这里我们用最简单的逻辑：请求 WDA 打开多任务
+      async function goAppSwitcher() {
+        console.log("🗂 切换多任务");
+        await performAction("/api/app_switcher", {}); // 后面要在 server.js 里写这个接口
+      }
+
+      // 获取屏幕尺寸（用于计算滑动坐标）
+      let deviceSize = null;
+      let deviceSizePromise = null;
+
+      async function getDeviceSize() {
+        if (deviceSize) return deviceSize;
+
+        // 如果正在请求，返回同一个Promise
+        if (deviceSizePromise) {
+          return deviceSizePromise;
+        }
+
+        deviceSizePromise = (async () => {
+          try {
+            const response = await fetch("/api/device/size");
+            if (response.ok) {
+              const data = await response.json();
+              deviceSize = { width: data.width, height: data.height };
+              deviceSizePromise = null;
+              return deviceSize;
+            }
+          } catch (e) {
+            console.error("获取设备尺寸失败:", e);
+          }
+          // 默认尺寸
+          deviceSize = { width: 375, height: 812 };
+          deviceSizePromise = null;
+          return deviceSize;
+        })();
+
+        return deviceSizePromise;
+      }
+
+      // 页面加载时预先获取设备尺寸
+      getDeviceSize();
+
+      // 四个方向滑动 - 优化版本，减少延迟
+      function swipeDirection(direction) {
+        const screenImg = document.getElementById("screen-view");
+        const rect = screenImg.getBoundingClientRect();
+        const viewWidth = rect.width;
+        const viewHeight = rect.height;
+
+        // 使用缓存的尺寸，如果没有则使用默认值（避免等待）
+        const defaultSize = { width: 375, height: 812 };
+        const size = deviceSize || defaultSize;
+
+        const centerX = size.width / 2;
+        const centerY = size.height / 2;
+
+        // 增大滑动距离：左右滑动使用屏幕宽度的60%，上下滑动使用屏幕高度的50%
+        const horizontalSwipeDistance = size.width * 0.6; // 左右滑动距离为屏幕宽度的60%
+        const verticalSwipeDistance = size.height * 0.5; // 上下滑动距离为屏幕高度的50%
+
+        let startX, startY, endX, endY;
+
+        switch (direction) {
+          case "up":
+            startX = centerX;
+            startY = centerY + verticalSwipeDistance / 2;
+            endX = centerX;
+            endY = centerY - verticalSwipeDistance / 2;
+            break;
+          case "down":
+            startX = centerX;
+            startY = centerY - verticalSwipeDistance / 2;
+            endX = centerX;
+            endY = centerY + verticalSwipeDistance / 2;
+            break;
+          case "left":
+            // 从左边缘向右滑动，实现向右切换界面
+            startX = size.width * 0.1; // 从屏幕左侧10%位置开始
+            startY = centerY;
+            endX = size.width * 0.7; // 滑动到屏幕70%位置
+            endY = centerY;
+            break;
+          case "right":
+            // 从右边缘向左滑动，实现向左切换界面
+            startX = size.width * 0.9; // 从屏幕右侧90%位置开始
+            startY = centerY;
+            endX = size.width * 0.3; // 滑动到屏幕30%位置
+            endY = centerY;
+            break;
+        }
+
+        // 将设备坐标转换为视图坐标
+        const startXView = (startX / size.width) * viewWidth;
+        const startYView = (startY / size.height) * viewHeight;
+        const endXView = (endX / size.width) * viewWidth;
+        const endYView = (endY / size.height) * viewHeight;
+
+        // 立即执行，不等待
+        performAction("/api/swipe", {
+          startX: startXView,
+          startY: startYView,
+          endX: endXView,
+          endY: endYView,
+          viewWidth,
+          viewHeight,
+        });
+
+        // 如果尺寸还没加载，异步更新（不影响当前操作）
+        if (!deviceSize) {
+          getDeviceSize().then((actualSize) => {
+            // 尺寸加载完成后，下次操作会使用实际尺寸
+          });
+        }
+      }
+    </script>
+  </body>
+</html>

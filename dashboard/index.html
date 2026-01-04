@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>云真机中控台 | Device Farm</title>
+    <style>
+      :root {
+        --bg: #121212;
+        --card-bg: #1e1e1e;
+        --text-main: #e0e0e0;
+        --text-sub: #a0a0a0;
+        --accent: #2196f3;
+        --success: #00e676;
+        --error: #ff5252;
+      }
+
+      body {
+        margin: 0;
+        padding: 40px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          sans-serif;
+        background-color: var(--bg);
+        color: var(--text-main);
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 40px;
+        border-bottom: 1px solid #333;
+        padding-bottom: 20px;
+      }
+
+      h1 {
+        margin: 0;
+        font-weight: 300;
+        letter-spacing: 1px;
+      }
+      .refresh-btn {
+        background: #333;
+        color: white;
+        border: none;
+        padding: 8px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: 0.2s;
+      }
+      .refresh-btn:hover {
+        background: #444;
+      }
+
+      /* 网格布局 */
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 25px;
+      }
+
+      /* 卡片样式 */
+      .card {
+        background: var(--card-bg);
+        border-radius: 12px;
+        padding: 20px;
+        border: 1px solid #333;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: visible;
+        min-height: 180px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
+        border-color: #555;
+      }
+
+      .card-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 15px;
+        flex-shrink: 0;
+      }
+      .icon {
+        font-size: 40px;
+        margin-right: 15px;
+      }
+      .device-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .device-info h3 {
+        margin: 0 0 5px 0;
+        font-size: 18px;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+      }
+      .device-info p {
+        margin: 0;
+        color: var(--text-sub);
+        font-size: 13px;
+        font-family: monospace;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+      }
+
+      /* 状态指示灯 */
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 12px;
+        background: rgba(255, 82, 82, 0.1);
+        color: var(--error);
+        margin-bottom: 15px;
+        flex-shrink: 0;
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        margin-right: 6px;
+      }
+
+      /* 在线状态覆盖 */
+      .card.online .status-badge {
+        background: rgba(0, 230, 118, 0.1);
+        color: var(--success);
+      }
+      .card.online {
+        border-left: 4px solid var(--success);
+      }
+
+      /* 按钮 */
+      .action-btn {
+        display: block;
+        width: 100%;
+        padding: 12px 0;
+        text-align: center;
+        background: #333;
+        color: #777;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: 600;
+        pointer-events: none;
+        transition: 0.2s;
+        flex-shrink: 0;
+        margin-top: auto;
+      }
+
+      .card.online .action-btn {
+        background: var(--accent);
+        color: white;
+        pointer-events: auto;
+        box-shadow: 0 4px 10px rgba(33, 150, 243, 0.3);
+      }
+      .card.online .action-btn:hover {
+        background: #1976d2;
+      }
+
+      /* 断开连接按钮 - 右上角小图标 */
+      .stop-btn {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        background: rgba(255, 82, 82, 0.1);
+        color: var(--error);
+        border: 1px solid rgba(255, 82, 82, 0.3);
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        line-height: 1;
+        z-index: 10;
+      }
+
+      .stop-btn:hover {
+        background: rgba(255, 82, 82, 0.2);
+        border-color: var(--error);
+        transform: scale(1.1);
+      }
+
+      .stop-btn:active {
+        background: rgba(255, 82, 82, 0.3);
+        transform: scale(0.95);
+      }
+
+      .stop-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .card:not(.online) .stop-btn {
+        display: none;
+      }
+
+      /* 重新连接按钮 */
+      .reconnect-btn {
+        display: block;
+        width: 100%;
+        padding: 10px 0;
+        text-align: center;
+        background: rgba(33, 150, 243, 0.1);
+        color: var(--accent);
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: 0.2s;
+        margin-top: 10px;
+        font-size: 14px;
+      }
+
+      .reconnect-btn:hover {
+        background: rgba(33, 150, 243, 0.2);
+        border-color: #2196f3;
+      }
+
+      .reconnect-btn:active {
+        background: rgba(33, 150, 243, 0.3);
+      }
+
+      .reconnect-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .card.online .reconnect-btn {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>🍎 iOS Device Farm Hub</h1>
+      <button class="refresh-btn" onclick="location.reload()">
+        🔄 刷新状态
+      </button>
+    </div>
+
+    <div class="grid" id="device-list"></div>
+
+    <script>
+      const container = document.getElementById("device-list");
+
+      // 从 API 获取配置
+      async function loadDevices() {
+        try {
+          const response = await fetch("/api/config");
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const data = await response.json();
+          const devices = data.devices.filter((device) => device.enable); // 只显示启用的设备
+
+          if (devices.length === 0) {
+            container.innerHTML =
+              '<div style="text-align: center; color: var(--text-sub); padding: 40px;">暂无启用的设备</div>';
+            return;
+          }
+
+          // 渲染设备列表
+          devices.forEach((device) => {
+            const url = `http://localhost:${device.web_port}`;
+
+            const card = document.createElement("div");
+            card.className = "card";
+            card.id = `dev-${device.local_port}`;
+
+            card.innerHTML = `
+                    <button class="stop-btn" onclick="stopDevice('${
+                      device.name
+                    }', this)" title="断开连接">✕</button>
+                    <div class="card-header">
+                        <div class="icon">📱</div>
+                        <div class="device-info">
+                            <h3>${device.name}</h3>
+                            <p>UDID: ${device.udid.substring(0, 8)}...</p>
+                            <p>Web端口: ${device.web_port}</p>
+                        </div>
+                    </div>
+                    <div class="status-badge">
+                        <span class="dot"></span>
+                        <span class="text">检查中...</span>
+                    </div>
+                    <a href="${url}" target="_blank" class="action-btn">连接设备</a>
+                    <button class="reconnect-btn" onclick="reconnectDevice('${
+                      device.name
+                    }', this)">重新连接</button>
+                `;
+
+            container.appendChild(card);
+
+            // 立即检查状态
+            checkDeviceHealth(url, card);
+          });
+        } catch (error) {
+          console.error("加载设备配置失败:", error);
+          container.innerHTML = `<div style="text-align: center; color: var(--error); padding: 40px;">
+            ❌ 加载配置失败: ${error.message}<br>
+            <small style="color: var(--text-sub);">请确保已启动服务并检查 config.json 配置</small>
+          </div>`;
+        }
+      }
+
+      // 页面加载时获取配置
+      loadDevices();
+
+      // 健康检查函数 - 通过实际检查端口连通性判断在线/离线
+      async function checkDeviceHealth(url, card) {
+        try {
+          // 尝试访问设备的 API 端点（/api/stream 或根路径）
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒超时
+
+          // 尝试访问 /api/stream 端点（这是 server.js 提供的接口）
+          const response = await fetch(`${url}`, {
+            method: "HEAD",
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          // 如果响应状态码在 200-499 之间，说明服务在线（即使 404 也说明端口可访问）
+          if (response.status >= 200 && response.status < 500) {
+            markOnline(card);
+          } else {
+            markOffline(card);
+          }
+        } catch (e) {
+          // 如果访问失败（网络错误、超时等），标记为离线
+          markOffline(card);
+          // 不输出错误日志，避免控制台噪音
+        }
+      }
+
+      // 标记为在线
+      function markOnline(card) {
+        card.classList.add("online");
+        const badge = card.querySelector(".status-badge");
+        badge.querySelector(".text").innerText = "在线 | 运行中";
+        const btn = card.querySelector(".action-btn");
+        btn.innerText = "🚀 进入投屏";
+        // 显示断开连接按钮
+        const stopBtn = card.querySelector(".stop-btn");
+        if (stopBtn) {
+          stopBtn.style.display = "flex";
+          stopBtn.disabled = false;
+          stopBtn.innerHTML = "✕";
+          stopBtn.title = "断开连接";
+          stopBtn.style.background = "";
+          stopBtn.style.color = "";
+          stopBtn.style.borderColor = "";
+        }
+      }
+
+      // 标记为离线
+      function markOffline(card) {
+        card.classList.remove("online");
+        const badge = card.querySelector(".status-badge");
+        badge.querySelector(".text").innerText = "离线 | 服务未启动";
+        const btn = card.querySelector(".action-btn");
+        btn.innerText = "连接设备";
+      }
+
+      // 重新连接设备
+      async function reconnectDevice(deviceName, button) {
+        // 禁用按钮，显示加载状态
+        button.disabled = true;
+        button.innerText = "连接中...";
+
+        try {
+          const response = await fetch("/api/device/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ deviceName }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok && data.success) {
+            button.innerText = "已启动";
+            button.style.background = "rgba(0, 230, 118, 0.1)";
+            button.style.color = "var(--success)";
+            button.style.borderColor = "var(--success)";
+
+            // 找到对应的卡片
+            const card = button.closest(".card");
+            if (card) {
+              // 更新状态为"启动中"
+              const badge = card.querySelector(".status-badge");
+              badge.querySelector(".text").innerText = "启动中，请稍候...";
+
+              // 延迟检查状态（等待服务启动）
+              setTimeout(() => {
+                const deviceInfo = card.querySelector(
+                  ".device-info p:last-child"
+                );
+                if (deviceInfo) {
+                  const portMatch =
+                    deviceInfo.textContent.match(/Web端口: (\d+)/);
+                  if (portMatch) {
+                    const port = portMatch[1];
+                    const url = `http://localhost:${port}`;
+                    // 每5秒检查一次，最多检查6次（30秒）
+                    let checkCount = 0;
+                    const checkInterval = setInterval(() => {
+                      checkCount++;
+                      checkDeviceHealth(url, card);
+                      if (
+                        card.classList.contains("online") ||
+                        checkCount >= 6
+                      ) {
+                        clearInterval(checkInterval);
+                      }
+                    }, 5000);
+                  }
+                }
+              }, 5000);
+            }
+
+            // 3秒后恢复按钮
+            setTimeout(() => {
+              button.disabled = false;
+              button.innerText = "重新连接";
+              button.style.background = "";
+              button.style.color = "";
+              button.style.borderColor = "";
+            }, 3000);
+          } else {
+            throw new Error(data.error || "启动设备失败");
+          }
+        } catch (error) {
+          console.error("启动设备失败:", error);
+          button.innerText = "启动失败";
+          button.style.background = "rgba(255, 82, 82, 0.2)";
+          setTimeout(() => {
+            button.disabled = false;
+            button.innerText = "重新连接";
+            button.style.background = "";
+          }, 2000);
+          alert(`启动设备失败: ${error.message}`);
+        }
+      }
+
+      // 断开设备连接
+      async function stopDevice(deviceName, button) {
+        if (!confirm(`确定要断开设备 "${deviceName}" 的连接吗？`)) {
+          return;
+        }
+
+        // 禁用按钮，显示加载状态
+        button.disabled = true;
+        button.innerHTML = "⋯";
+        button.title = "断开中...";
+
+        try {
+          const response = await fetch("/api/device/stop", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ deviceName }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok && data.success) {
+            button.innerHTML = "✓";
+            button.style.background = "rgba(0, 230, 118, 0.1)";
+            button.style.color = "var(--success)";
+            button.style.borderColor = "var(--success)";
+            button.title = "已断开";
+
+            // 找到对应的卡片并更新状态
+            const card = button.closest(".card");
+            if (card) {
+              markOffline(card);
+              // 延迟刷新状态
+              setTimeout(() => {
+                const deviceInfo = card.querySelector(
+                  ".device-info p:last-child"
+                );
+                if (deviceInfo) {
+                  const portMatch =
+                    deviceInfo.textContent.match(/Web端口: (\d+)/);
+                  if (portMatch) {
+                    const port = portMatch[1];
+                    const url = `http://localhost:${port}`;
+                    checkDeviceHealth(url, card);
+                  }
+                }
+              }, 2000);
+            }
+
+            // 1秒后隐藏按钮（因为设备已离线）
+            setTimeout(() => {
+              button.style.display = "none";
+            }, 1000);
+          } else {
+            throw new Error(data.error || "断开连接失败");
+          }
+        } catch (error) {
+          console.error("断开连接失败:", error);
+          button.innerHTML = "✕";
+          button.style.background = "rgba(255, 82, 82, 0.2)";
+          button.title = "断开失败";
+          setTimeout(() => {
+            button.disabled = false;
+            button.innerHTML = "✕";
+            button.style.background = "";
+            button.title = "断开连接";
+          }, 2000);
+          alert(`断开连接失败: ${error.message}`);
+        }
+      }
+
+      // 定期刷新所有设备状态
+      function refreshAllDevices() {
+        const cards = container.querySelectorAll(".card");
+        cards.forEach((card) => {
+          const deviceInfo = card.querySelector(".device-info p:last-child");
+          if (deviceInfo) {
+            const portMatch = deviceInfo.textContent.match(/Web端口: (\d+)/);
+            if (portMatch) {
+              const port = portMatch[1];
+              const url = `http://localhost:${port}`;
+              checkDeviceHealth(url, card);
+            }
+          }
+        });
+      }
+
+      // 每 10 秒自动刷新一次设备状态
+      setInterval(refreshAllDevices, 10000);
+    </script>
+  </body>
+</html>
