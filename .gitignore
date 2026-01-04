@@ -9,6 +9,10 @@ logs/
 pids/
 *.pid
 
+# 文件上传临时目录
+uploads/
+device_mount/
+
 # 系统文件
 .DS_Store
 *.swp

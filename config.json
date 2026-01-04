@@ -8,13 +8,13 @@
     {
       "name": "iPhone_13",
       "udid": "00008130-001904A436DA001C",
-      "local_port": 8100,
+      "local_port": 10010,
       "enable": true
     },
     {
       "name": "Test_2",
       "udid": "9a470a611f8536d5ded90ee027d2b3ee5a36ee72",
-      "local_port": 8200,
+      "local_port": 10020,
       "enable": true
     }
   ]

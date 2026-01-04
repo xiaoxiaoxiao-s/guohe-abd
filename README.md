@@ -164,9 +164,19 @@ node manager.js restart
 
 启动服务后，在浏览器中访问：
 
+**本地访问**：
+
 ```
 http://localhost:3000
 ```
+
+**外网访问**：
+
+```
+http://<your-server-ip>:3000
+```
+
+> 💡 **提示**：所有服务默认监听 `0.0.0.0`，支持外网访问。请确保防火墙已开放相应端口。
 
 Dashboard 会显示所有配置的设备，包括：
 
@@ -182,9 +192,19 @@ Dashboard 会显示所有配置的设备，包括：
 
 方式二：直接访问设备对应的 Web 端口：
 
+**本地访问**：
+
 ```
 http://localhost:8102  # 假设设备 local_port 是 8100
 ```
+
+**外网访问**：
+
+```
+http://<your-server-ip>:8102
+```
+
+> 💡 **提示**：Dashboard 会自动检测当前访问地址（本地或外网），并生成对应的设备链接。
 
 ### 3. 设备控制界面功能
 
@@ -214,6 +234,100 @@ guohe-abd/
 └── pids/                    # PID 文件目录
     └── {device_name}_*.pid
 ```
+
+## 外网访问配置
+
+### 防火墙设置
+
+如果需要在其他设备上访问服务，需要确保防火墙开放相应端口：
+
+**macOS**：
+
+```bash
+# 查看防火墙状态
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+
+# 开放端口（以 3000 为例）
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/sbin/httpd
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/sbin/httpd
+```
+
+**Linux**：
+
+```bash
+# Ubuntu/Debian
+sudo ufw allow 3000/tcp
+sudo ufw allow 8100:8200/tcp  # 根据设备数量调整端口范围
+
+# CentOS/RHEL
+sudo firewall-cmd --permanent --add-port=3000/tcp
+sudo firewall-cmd --permanent --add-port=8100-8200/tcp
+sudo firewall-cmd --reload
+```
+
+### 端口说明
+
+- **Dashboard 端口**：`dashboard_port`（默认 3000）
+- **设备端口**：每个设备需要 3 个连续端口
+  - `local_port`：WDA 控制端口
+  - `local_port + 1`：视频流端口
+  - `local_port + 2`：Web 访问端口
+
+### 安全建议
+
+⚠️ **重要**：外网访问时请注意安全：
+
+1. **使用 HTTPS**：建议使用反向代理（如 Nginx）配置 HTTPS
+2. **访问控制**：使用防火墙限制访问 IP
+3. **认证机制**：考虑添加登录认证（当前版本无认证）
+4. **VPN 访问**：建议通过 VPN 访问，而不是直接暴露到公网
+
+## 外网访问配置
+
+### 防火墙设置
+
+如果需要在其他设备上访问服务，需要确保防火墙开放相应端口：
+
+**macOS**：
+
+```bash
+# 查看防火墙状态
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
+
+# 开放端口（以 3000 为例）
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/sbin/httpd
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/sbin/httpd
+```
+
+**Linux**：
+
+```bash
+# Ubuntu/Debian
+sudo ufw allow 3000/tcp
+sudo ufw allow 8100:8200/tcp  # 根据设备数量调整端口范围
+
+# CentOS/RHEL
+sudo firewall-cmd --permanent --add-port=3000/tcp
+sudo firewall-cmd --permanent --add-port=8100-8200/tcp
+sudo firewall-cmd --reload
+```
+
+### 端口说明
+
+- **Dashboard 端口**：`dashboard_port`（默认 3000）
+- **设备端口**：每个设备需要 3 个连续端口
+  - `local_port`：WDA 控制端口
+  - `local_port + 1`：视频流端口
+  - `local_port + 2`：Web 访问端口
+
+### 安全建议
+
+⚠️ **重要**：外网访问时请注意安全：
+
+1. **使用 HTTPS**：建议使用反向代理（如 Nginx）配置 HTTPS
+2. **访问控制**：使用防火墙限制访问 IP
+3. **认证机制**：考虑添加登录认证（当前版本无认证）
+4. **VPN 访问**：建议通过 VPN 访问，而不是直接暴露到公网
 
 ## 常见问题
 

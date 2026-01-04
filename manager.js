@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
+const os = require("os");
 
 // 1. 读取配置
 const configPath = path.join(__dirname, "config.json");
@@ -32,10 +33,25 @@ function spawnProcess(cmd, name, type) {
   });
 }
 
+// 获取本机 IP 地址
+function getLocalIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      // 跳过内部（即 127.0.0.1）和非 IPv4 地址
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return "localhost";
+}
+
 // === 启动 Dashboard ===
 async function startDashboard() {
   const dashboardPort = config.dashboard_port || 3000;
   const logBase = path.join(config.log_dir, "dashboard");
+  const localIP = getLocalIP();
 
   // 检查是否已运行
   if (fs.existsSync(path.join(config.pid_dir, "dashboard.pid"))) {
@@ -44,7 +60,8 @@ async function startDashboard() {
   }
 
   console.log(`\n[+] 启动 Dashboard (端口: ${dashboardPort})`);
-  console.log(`    访问地址: http://localhost:${dashboardPort}`);
+  console.log(`    本地访问: http://localhost:${dashboardPort}`);
+  console.log(`    外网访问: http://${localIP}:${dashboardPort}`);
 
   // 使用 pm2 启动 dashboard
   // 先检查是否已存在，如果存在则先删除
@@ -123,11 +140,13 @@ async function startAll() {
     const MJPEG_PORT = device.local_port + 1;
     const WEB_PORT = device.local_port + 2;
 
+    const localIP = getLocalIP();
     console.log(`\n[+] 启动设备组: ${device.name}`);
     console.log(`    WDA 控制端口: ${WDA_PORT}`);
     console.log(`    视频流端口: ${MJPEG_PORT}`);
     console.log(`    Web 访问端口: ${WEB_PORT}`);
-    console.log(`    访问地址: http://localhost:${WEB_PORT}`);
+    console.log(`    本地访问: http://localhost:${WEB_PORT}`);
+    console.log(`    外网访问: http://${localIP}:${WEB_PORT}`);
 
     // 1. 启动 iproxy (控制端口: 电脑端口 -> 手机8100端口)
     const iproxyCtrlCmd = `nohup iproxy ${WDA_PORT} 8100 -u ${device.udid} > "${logBase}_iproxy_ctrl.log" 2>&1 & echo $!`;
@@ -154,10 +173,16 @@ test > "${logBase}_wda.log" 2>&1 & echo $!`;
   }
 
   const dashboardPort = config.dashboard_port || 3000;
+  const localIP = getLocalIP();
+
   console.log("\n>>> 所有命令已发送。请等待约 10-30 秒让 WDA 初始化。");
-  console.log(`>>> 访问 Dashboard: http://localhost:${dashboardPort}`);
+  console.log(`>>> 访问 Dashboard:`);
+  console.log(`    本地: http://localhost:${dashboardPort}`);
+  console.log(`    外网: http://${localIP}:${dashboardPort}`);
   console.log(">>> 验证方式: curl http://localhost:<WDA_PORT>/status");
-  console.log(">>> 访问 Web 界面: http://localhost:<WEB_PORT>");
+  console.log(">>> 访问 Web 界面:");
+  console.log(`    本地: http://localhost:<WEB_PORT>`);
+  console.log(`    外网: http://${localIP}:<WEB_PORT>`);
 }
 
 // === 停止所有任务 ===

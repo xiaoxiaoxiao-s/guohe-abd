@@ -3,6 +3,7 @@ const path = require("path");
 const cors = require("cors");
 const fs = require("fs");
 const { exec } = require("child_process");
+const os = require("os");
 
 const app = express();
 app.use(cors());
@@ -195,13 +196,38 @@ test > "${logBase}_wda.log" 2>&1 & echo $!`;
   }
 });
 
+// 设备控制页面路由（通过端口参数区分设备）
+app.get("/device", (req, res) => {
+  const port = req.query.port;
+  if (!port) {
+    return res.status(400).send("缺少端口参数");
+  }
+  res.sendFile(path.join(__dirname, "dashboard", "device.html"));
+});
+
 // 确保根路径返回 dashboard/index.html
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "dashboard", "index.html"));
 });
 
+// 获取本机 IP 地址
+function getLocalIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      // 跳过内部（即 127.0.0.1）和非 IPv4 地址
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return "localhost";
+}
+
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
+  const localIP = getLocalIP();
   console.log(`📊 Dashboard 服务已启动: http://localhost:${PORT}`);
+  console.log(`🌐 外网访问: http://${localIP}:${PORT}`);
 });

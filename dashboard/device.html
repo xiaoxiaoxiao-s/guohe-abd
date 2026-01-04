@@ -203,7 +203,7 @@
     <div class="left-panel">
       <h2>📱 iOS Remote Control</h2>
       <div class="phone-wrapper">
-        <img id="screen-view" src="/api/stream" alt="等待连接手机画面..." />
+        <img id="screen-view" src="" alt="等待连接手机画面..." />
       </div>
       <div class="status-bar">
         状态: <span id="status-text">正在连接视频流...</span>
@@ -218,6 +218,30 @@
             🏠 Home (回桌面)
           </button>
           <button class="btn" onclick="goAppSwitcher()">🗂 多任务</button>
+        </div>
+
+        <div class="control-section">
+          <div class="control-section-title">文件传输</div>
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <input
+              type="file"
+              id="videoFileInput"
+              accept="video/*"
+              style="display: none"
+              onchange="handleFileSelect(event)"
+            />
+            <button
+              class="btn"
+              onclick="document.getElementById('videoFileInput').click()"
+              style="width: 100%"
+            >
+              📹 选择视频文件
+            </button>
+            <div
+              id="uploadStatus"
+              style="font-size: 12px; color: #666; min-height: 20px"
+            ></div>
+          </div>
         </div>
 
         <div class="control-section">
@@ -257,8 +281,22 @@
     </div>
 
     <script>
+      // 从 URL 参数获取设备端口
+      const urlParams = new URLSearchParams(window.location.search);
+      const devicePort = urlParams.get("port");
+      if (!devicePort) {
+        alert("缺少端口参数，请从 Dashboard 正确访问");
+        window.location.href = "/";
+      }
+
+      // API 基础 URL（使用设备端口）
+      const API_BASE = `http://${window.location.hostname}:${devicePort}`;
+
       const screenImg = document.getElementById("screen-view");
       const statusText = document.getElementById("status-text");
+
+      // 设置视频流 URL
+      screenImg.src = `${API_BASE}/api/stream`;
 
       screenImg.onload = () => {
         statusText.innerText = "✅ 在线 | 点击 / 快速滑动 / 慢速拖拽";
@@ -356,7 +394,9 @@
 
       // 优化：使用 fire-and-forget 模式，不等待响应
       function performAction(url, data) {
-        fetch(url, {
+        // 如果 url 是相对路径，使用 API_BASE
+        const fullUrl = url.startsWith("http") ? url : `${API_BASE}${url}`;
+        fetch(fullUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(data),
@@ -393,7 +433,9 @@
 
         deviceSizePromise = (async () => {
           try {
-            const response = await fetch("/api/device/size");
+            const response = await fetch(`${API_BASE}/api/device/size`, {
+              method: "GET",
+            });
             if (response.ok) {
               const data = await response.json();
               deviceSize = { width: data.width, height: data.height };
@@ -429,9 +471,9 @@
         const centerX = size.width / 2;
         const centerY = size.height / 2;
 
-        // 增大滑动距离：左右滑动使用屏幕宽度的60%，上下滑动使用屏幕高度的50%
+        // 增大滑动距离：左右滑动使用屏幕宽度的60%，上下滑动使用屏幕高度的60%（加快滑动速度）
         const horizontalSwipeDistance = size.width * 0.6; // 左右滑动距离为屏幕宽度的60%
-        const verticalSwipeDistance = size.height * 0.5; // 上下滑动距离为屏幕高度的50%
+        const verticalSwipeDistance = size.height * 0.6; // 上下滑动距离为屏幕高度的60%（从50%增加到60%）
 
         let startX, startY, endX, endY;
 
@@ -486,6 +528,99 @@
             // 尺寸加载完成后，下次操作会使用实际尺寸
           });
         }
+      }
+
+      // 文件上传功能
+      function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) {
+          return;
+        }
+
+        // 检查文件类型
+        if (!file.type.startsWith("video/")) {
+          showUploadStatus("❌ 请选择视频文件", "error");
+          return;
+        }
+
+        // 检查文件大小（2GB）
+        const maxSize = 2 * 1024 * 1024 * 1024;
+        if (file.size > maxSize) {
+          showUploadStatus("❌ 文件大小不能超过 2GB", "error");
+          return;
+        }
+
+        uploadFile(file);
+      }
+
+      async function uploadFile(file) {
+        const statusDiv = document.getElementById("uploadStatus");
+        const formData = new FormData();
+        formData.append("video", file);
+
+        showUploadStatus(
+          `📤 正在上传: ${file.name} (${formatFileSize(file.size)})...`,
+          "uploading"
+        );
+
+        try {
+          const response = await fetch(`${API_BASE}/api/upload`, {
+            method: "POST",
+            body: formData,
+          });
+
+          const result = await response.json();
+
+          if (response.ok && result.success) {
+            showUploadStatus(`✅ ${result.message}`, "success");
+          } else {
+            showUploadStatus(
+              `❌ ${result.error || result.message || "上传失败"}`,
+              "error"
+            );
+            if (result.details) {
+              console.error("上传错误详情:", result.details);
+            }
+          }
+        } catch (error) {
+          console.error("上传失败:", error);
+          showUploadStatus(`❌ 上传失败: ${error.message}`, "error");
+        } finally {
+          // 清空文件选择，允许重复选择同一文件
+          document.getElementById("videoFileInput").value = "";
+        }
+      }
+
+      function showUploadStatus(message, type) {
+        const statusDiv = document.getElementById("uploadStatus");
+        statusDiv.textContent = message;
+        statusDiv.style.color =
+          type === "success"
+            ? "#4caf50"
+            : type === "error"
+            ? "#f44336"
+            : type === "uploading"
+            ? "#2196f3"
+            : "#666";
+
+        // 3秒后清除成功消息
+        if (type === "success") {
+          setTimeout(() => {
+            if (statusDiv.textContent === message) {
+              statusDiv.textContent = "";
+            }
+          }, 3000);
+        }
+      }
+
+      function formatFileSize(bytes) {
+        if (bytes === 0) return "0 B";
+        const k = 1024;
+        const sizes = ["B", "KB", "MB", "GB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return (
+          Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i]
+        );
       }
     </script>
   </body>

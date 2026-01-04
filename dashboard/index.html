@@ -273,11 +273,17 @@
 
           // 渲染设备列表
           devices.forEach((device) => {
-            const url = `http://localhost:${device.web_port}`;
+            // 使用当前页面的 hostname，支持外网访问
+            const hostname = window.location.hostname;
+            // 使用 dashboard 的设备控制页面，通过端口参数区分设备
+            const url = `/device?port=${device.web_port}`;
+            const wdaPort = device.wda_port; // WDA 端口
 
             const card = document.createElement("div");
             card.className = "card";
             card.id = `dev-${device.local_port}`;
+            // 将 WDA 端口存储在 data 属性中，方便后续使用
+            card.setAttribute("data-wda-port", wdaPort);
 
             card.innerHTML = `
                     <button class="stop-btn" onclick="stopDevice('${
@@ -303,8 +309,8 @@
 
             container.appendChild(card);
 
-            // 立即检查状态
-            checkDeviceHealth(url, card);
+            // 立即检查状态（传入 WDA 端口）
+            checkDeviceHealth(hostname, wdaPort, card);
           });
         } catch (error) {
           console.error("加载设备配置失败:", error);
@@ -318,29 +324,30 @@
       // 页面加载时获取配置
       loadDevices();
 
-      // 健康检查函数 - 通过实际检查端口连通性判断在线/离线
-      async function checkDeviceHealth(url, card) {
+      // 健康检查函数 - 直接通过 WDA /status 接口判断设备连接状态
+      async function checkDeviceHealth(hostname, wdaPort, card) {
         try {
-          // 尝试访问设备的 API 端点（/api/stream 或根路径）
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3000); // 3秒超时
+          // 直接访问 WDA 的 /status 接口
+          const wdaStatusUrl = `http://${hostname}:${wdaPort}/status`;
 
-          // 尝试访问 /api/stream 端点（这是 server.js 提供的接口）
-          const response = await fetch(`${url}`, {
-            method: "HEAD",
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
+
+          const response = await fetch(wdaStatusUrl, {
+            method: "GET",
             signal: controller.signal,
           });
 
           clearTimeout(timeoutId);
 
-          // 如果响应状态码在 200-499 之间，说明服务在线（即使 404 也说明端口可访问）
-          if (response.status >= 200 && response.status < 500) {
+          // 如果 WDA 返回 200，说明设备已连接
+          if (response.ok) {
             markOnline(card);
           } else {
             markOffline(card);
           }
         } catch (e) {
-          // 如果访问失败（网络错误、超时等），标记为离线
+          // 如果访问失败（网络错误、超时、CORS 等），标记为离线
           markOffline(card);
           // 不输出错误日志，避免控制台噪音
         }
@@ -407,28 +414,18 @@
 
               // 延迟检查状态（等待服务启动）
               setTimeout(() => {
-                const deviceInfo = card.querySelector(
-                  ".device-info p:last-child"
-                );
-                if (deviceInfo) {
-                  const portMatch =
-                    deviceInfo.textContent.match(/Web端口: (\d+)/);
-                  if (portMatch) {
-                    const port = portMatch[1];
-                    const url = `http://localhost:${port}`;
-                    // 每5秒检查一次，最多检查6次（30秒）
-                    let checkCount = 0;
-                    const checkInterval = setInterval(() => {
-                      checkCount++;
-                      checkDeviceHealth(url, card);
-                      if (
-                        card.classList.contains("online") ||
-                        checkCount >= 6
-                      ) {
-                        clearInterval(checkInterval);
-                      }
-                    }, 5000);
-                  }
+                const wdaPort = card.getAttribute("data-wda-port");
+                if (wdaPort) {
+                  const hostname = window.location.hostname;
+                  // 每5秒检查一次，最多检查6次（30秒）
+                  let checkCount = 0;
+                  const checkInterval = setInterval(() => {
+                    checkCount++;
+                    checkDeviceHealth(hostname, parseInt(wdaPort), card);
+                    if (card.classList.contains("online") || checkCount >= 6) {
+                      clearInterval(checkInterval);
+                    }
+                  }, 5000);
                 }
               }, 5000);
             }
@@ -492,17 +489,10 @@
               markOffline(card);
               // 延迟刷新状态
               setTimeout(() => {
-                const deviceInfo = card.querySelector(
-                  ".device-info p:last-child"
-                );
-                if (deviceInfo) {
-                  const portMatch =
-                    deviceInfo.textContent.match(/Web端口: (\d+)/);
-                  if (portMatch) {
-                    const port = portMatch[1];
-                    const url = `http://localhost:${port}`;
-                    checkDeviceHealth(url, card);
-                  }
+                const wdaPort = card.getAttribute("data-wda-port");
+                if (wdaPort) {
+                  const hostname = window.location.hostname;
+                  checkDeviceHealth(hostname, parseInt(wdaPort), card);
                 }
               }, 2000);
             }
@@ -532,15 +522,11 @@
       // 定期刷新所有设备状态
       function refreshAllDevices() {
         const cards = container.querySelectorAll(".card");
+        const hostname = window.location.hostname;
         cards.forEach((card) => {
-          const deviceInfo = card.querySelector(".device-info p:last-child");
-          if (deviceInfo) {
-            const portMatch = deviceInfo.textContent.match(/Web端口: (\d+)/);
-            if (portMatch) {
-              const port = portMatch[1];
-              const url = `http://localhost:${port}`;
-              checkDeviceHealth(url, card);
-            }
+          const wdaPort = card.getAttribute("data-wda-port");
+          if (wdaPort) {
+            checkDeviceHealth(hostname, parseInt(wdaPort), card);
           }
         });
       }
