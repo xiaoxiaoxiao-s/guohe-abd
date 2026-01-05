@@ -713,35 +713,49 @@ app.post("/api/clipboard/write", async (req, res) => {
   }
 });
 
-// API 粘贴api - 读取 Mac 粘贴板并同步到 iOS 设备
+// API 粘贴api - 通过 WDA 将文本设置到 iOS 设备粘贴板
 app.post("/api/clipboard", async (req, res) => {
   try {
-    // 1. 读取 Mac 粘贴板内容（使用已定义的 execAsync）
-    const { stdout: macClipboardText } = await execAsync("pbpaste");
-    const text = macClipboardText.trim();
+    let text;
 
-    if (!text) {
-      return res.status(400).json({ error: "Mac 粘贴板为空" });
+    // 1. 优先使用请求体中的 text 参数，如果没有则从 Mac 粘贴板读取（向后兼容）
+    if (req.body && req.body.text) {
+      text = req.body.text.trim();
+      console.log(
+        `📋 [API] 使用请求参数中的文本: "${text.substring(0, 50)}${
+          text.length > 50 ? "..." : ""
+        }"`
+      );
+    } else {
+      // 从 Mac 粘贴板读取（向后兼容）
+      const { stdout: macClipboardText } = await execAsync("pbpaste");
+      text = macClipboardText.trim();
+      console.log(
+        `📋 [API] 读取 Mac 粘贴板内容: "${text.substring(0, 50)}${
+          text.length > 50 ? "..." : ""
+        }"`
+      );
     }
 
-    console.log(
-      `📋 [API] 读取 Mac 粘贴板内容: "${text.substring(0, 50)}${
-        text.length > 50 ? "..." : ""
-      }"`
-    );
+    if (!text) {
+      return res.status(400).json({ error: "文本内容为空" });
+    }
 
-    // 2. 获取 Session (复用之前的逻辑)
+    // 2. 获取 WDA Session
     let sessionId;
     try {
       const status = await axios.get(`${WDA_CTRL}/status`);
       sessionId = status.data.sessionId;
-    } catch (e) {}
+    } catch (e) {
+      console.log("⚠️ 未找到现有 Session，创建新 Session...");
+    }
 
     if (!sessionId) {
       const create = await axios.post(`${WDA_CTRL}/session`, {
         capabilities: {},
       });
       sessionId = create.data.sessionId;
+      console.log(`✅ 创建新 Session: ${sessionId}`);
     }
 
     // 3. 将文本转为 Base64 (WDA 要求内容必须是 Base64 编码)
@@ -754,11 +768,20 @@ app.post("/api/clipboard", async (req, res) => {
       label: "CommandTest",
     });
 
-    console.log("✅ 剪贴板设置成功！");
-    res.json({ success: true, message: "已从 Mac 粘贴板同步到 iOS 设备" });
+    console.log("✅ 通过 WDA 设置手机粘贴板成功！");
+    res.json({
+      success: true,
+      message: "已通过 WDA 将文本设置到 iOS 设备粘贴板",
+    });
   } catch (error) {
-    console.error("❌ 剪贴板设置失败:", error.message);
-    res.status(500).json({ error: "WDA 连接失败或设置出错" });
+    console.error("❌ WDA 剪贴板设置失败:", error.message);
+    if (error.response) {
+      console.error("   响应数据:", error.response.data);
+    }
+    res.status(500).json({
+      error: "WDA 连接失败或设置出错",
+      details: error.message,
+    });
   }
 });
 // server.js 只提供 API 接口，不提供静态文件服务
@@ -784,20 +807,4 @@ app.listen(SERVER_PORT, "0.0.0.0", async () => {
   console.log(`🚀 服务已启动: http://0.0.0.0:${SERVER_PORT}`);
   console.log(`📱 本地访问: http://localhost:${SERVER_PORT}`);
   console.log(`🌐 外网访问: http://${localIP}:${SERVER_PORT}`);
-
-  // // 启动 localtunnel（如果失败不影响主服务）
-  // try {
-  //   const tunnel = await localtunnel({
-  //     port: SERVER_PORT, // port 应该是数字，不是 URL
-  //   });
-  //   console.log(`[🌍] Localtunnel 外网访问地址: ${tunnel.url}`);
-
-  //   // 监听 tunnel 关闭事件
-  //   tunnel.on("close", () => {
-  //     console.log("[🌍] Localtunnel 已关闭");
-  //   });
-  // } catch (tunnelError) {
-  //   console.warn(`[⚠️] Localtunnel 启动失败: ${tunnelError.message}`);
-  //   console.warn(`[⚠️] 服务仍可正常使用，但无法通过 Localtunnel 外网访问`);
-  // }
 });

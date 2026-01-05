@@ -742,7 +742,7 @@
         );
       }
 
-      // 粘贴板功能
+      // 粘贴板功能 - 直接通过 WDA 设置到手机粘贴板
       async function setClipboard() {
         const input = document.getElementById("clipboardInput");
         const text = input.value.trim();
@@ -753,45 +753,29 @@
           return;
         }
 
-        showClipboardStatus("📋 正在复制到粘贴板...", "uploading");
+        showClipboardStatus("📋 正在通过 WDA 设置到手机粘贴板...", "uploading");
 
         try {
-          // 1. 先将内容写入 Mac 粘贴板
-          const writeResponse = await fetch(`${API_BASE}/api/clipboard/write`, {
+          // 直接调用后端接口，通过 WDA 将文本设置到手机粘贴板
+          const response = await fetch(`${API_BASE}/api/clipboard`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: text }),
           });
 
-          const writeResult = await writeResponse.json();
-
-          if (!writeResponse.ok || !writeResult.success) {
-            showClipboardStatus(
-              `❌ ${writeResult.error || "写入 Mac 粘贴板失败"}`,
-              "error"
-            );
-            return;
-          }
-
-          // 2. 短暂延迟，确保粘贴板已更新
-          await new Promise((resolve) => setTimeout(resolve, 100));
-
-          // 3. 调用后端接口，后端会读取 Mac 粘贴板并同步到 iOS 设备
-          const response = await fetch(`${API_BASE}/api/clipboard`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-          });
-
           const result = await response.json();
 
           if (response.ok && result.success) {
-            showClipboardStatus("✅ 已成功复制到粘贴板", "success");
+            showClipboardStatus("✅ 已成功设置到手机粘贴板", "success");
           } else {
-            showClipboardStatus(`❌ ${result.error || "复制失败"}`, "error");
+            showClipboardStatus(
+              `❌ ${result.error || result.details || "设置失败"}`,
+              "error"
+            );
           }
         } catch (error) {
-          console.error("复制失败:", error);
-          showClipboardStatus(`❌ 复制失败: ${error.message}`, "error");
+          console.error("设置粘贴板失败:", error);
+          showClipboardStatus(`❌ 设置失败: ${error.message}`, "error");
         }
       }
 
