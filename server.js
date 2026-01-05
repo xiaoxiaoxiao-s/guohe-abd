@@ -27,6 +27,14 @@ console.log(
 const WDA_CTRL = `http://127.0.0.1:${WDA_PORT}`;
 const MJPEG_URL = `http://127.0.0.1:${MJPEG_PORT}`;
 
+// ==========================================
+// 1. 配置 Chrome 的参数
+// ==========================================
+// Google Chrome 的 iOS 包名
+const CHROME_BUNDLE_ID = "com.google.chrome.ios";
+// 在“文件”App 中显示的文件夹名字 (通常就是 "Chrome")
+const CHROME_FOLDER_NAME = "Chrome";
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -115,133 +123,204 @@ function getDeviceUDID() {
   }
 }
 
-app.get("/api/tttt", async (req, res) => {
-  try {
-    const size = await getScreenSize();
-    res.json(size);
-  } catch (error) {
-    console.error(`[API] ❌ 获取设备尺寸失败: ${error.message}`);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.status(500).json({ error: "获取设备尺寸失败" });
-  }
-});
+// ==========================================
+// 2. WDA 自动化: 去“文件”App的 Chrome 文件夹保存视频
+// ==========================================
+async function saveFromChromeFolder(filename) {
+  const sessionId = await getSessionId();
+  const screen = await getScreenSize();
 
-app.post("/api/upload", upload.single("video"), async (req, res) => {
-  console.log(`[API] /api/upload 请求 - 端口: ${SERVER_PORT}`);
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "请选择要上传的文件" });
+  console.log(`🤖 [WDA] 启动“文件”App (访问 Chrome 容器)...`);
+
+  // 1. 启动 iOS 自带的“文件” App
+  await axios.post(
+    `${WDA_CTRL}/session/${sessionId}/appium/device/activate_app`,
+    {
+      bundleId: "com.apple.DocumentsApp",
     }
+  );
+
+  await new Promise((r) => setTimeout(r, 2000));
+
+  // --- 辅助点击函数 (通过文字) ---
+  const tapText = async (text) => {
+    try {
+      // 优先用 label 查找
+      const body = {
+        using: "class chain",
+        value: `**/XCUIElementTypeButton[\`label CONTAINS "${text}"\`]`,
+      };
+      // 备用: StaticText
+      const body2 = {
+        using: "class chain",
+        value: `**/XCUIElementTypeStaticText[\`label CONTAINS "${text}"\`]`,
+      };
+
+      let ele = await axios.post(
+        `${WDA_CTRL}/session/${sessionId}/element`,
+        body
+      );
+      if (!ele.data.value.ELEMENT)
+        ele = await axios.post(
+          `${WDA_CTRL}/session/${sessionId}/element`,
+          body2
+        );
+
+      if (ele.data.value.ELEMENT) {
+        console.log(`    🖱️ 点击: ${text}`);
+        await axios.post(
+          `${WDA_CTRL}/session/${sessionId}/element/${ele.data.value.ELEMENT}/click`
+        );
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // --- 辅助点击函数 (通过坐标 - 用于分享按钮) ---
+  const tapPoint = async (x, y) => {
+    await axios.post(`${WDA_CTRL}/session/${sessionId}/actions`, {
+      actions: [
+        {
+          type: "pointer",
+          id: "finger1",
+          parameters: { pointerType: "touch" },
+          actions: [
+            { type: "pointerMove", duration: 0, x: x, y: y },
+            { type: "pointerDown", button: 0 },
+            { type: "pause", duration: 100 },
+            { type: "pointerUp", button: 0 },
+          ],
+        },
+      ],
+    });
+  };
+
+  // --- 自动化步骤 ---
+
+  // 1. 确保回退到“浏览”根目录
+  await tapText("浏览");
+  await new Promise((r) => setTimeout(r, 500));
+  await tapText("浏览"); // 多点一次确保回退
+  await new Promise((r) => setTimeout(r, 500));
+
+  // 2. 进入“我的 iPhone”
+  // 注意：如果界面是英文，这里需要改成 "On My iPhone"
+  let enterMyPhone = await tapText("我的 iPhone");
+  if (!enterMyPhone) enterMyPhone = await tapText("On My iPhone");
+
+  await new Promise((r) => setTimeout(r, 1000));
+
+  // 3. 点击 "Chrome" 文件夹
+  console.log(`    📂 寻找 ${CHROME_FOLDER_NAME} 文件夹...`);
+  let folderClicked = await tapText(CHROME_FOLDER_NAME);
+
+  // 如果没找到，尝试简单滑一下屏幕 (防止文件夹在下面)
+  if (!folderClicked) {
+    console.log("    👇 下滑查找文件夹...");
+    await axios.post(`${WDA_CTRL}/session/${sessionId}/actions`, {
+      actions: [
+        {
+          type: "pointer",
+          id: "finger1",
+          parameters: { pointerType: "touch" },
+          actions: [
+            { type: "pointerMove", duration: 0, x: 200, y: 500 },
+            { type: "pointerDown", button: 0 },
+            { type: "pointerMove", duration: 200, x: 200, y: 200 }, // 上滑手势
+            { type: "pointerUp", button: 0 },
+          ],
+        },
+      ],
+    });
+    await new Promise((r) => setTimeout(r, 1000));
+    folderClicked = await tapText(CHROME_FOLDER_NAME);
+  }
+
+  if (folderClicked) {
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // 4. 点击视频文件 (文件名)
+    console.log(`    🎬 点击文件: ${filename}`);
+    const fileClicked = await tapText(filename);
+
+    if (fileClicked) {
+      await new Promise((r) => setTimeout(r, 1500)); // 等待视频预览加载
+
+      console.log(`    🚀 点击分享 (左下角)...`);
+      // 5. 点击左下角分享按钮 (坐标适配绝大多数 iPhone)
+      await tapPoint(30, screen.height - 50);
+
+      await new Promise((r) => setTimeout(r, 1500)); // 等待菜单弹出
+
+      // 6. 点击保存
+      console.log(`    💾 点击保存...`);
+      let saved = await tapText("保存视频");
+      if (!saved) saved = await tapText("Save Video");
+
+      if (saved) console.log(`✅ [完成] 视频已存入相册！`);
+    } else {
+      console.log(`❌ 未找到文件: ${filename}，可能是上传还没完成？`);
+    }
+  } else {
+    console.log(
+      `❌ 未找到 Chrome 文件夹，请确认手机已安装 Chrome 且打开过一次。`
+    );
+  }
+}
+
+// ==========================================
+// 3. 上传接口 (Tidevice -> Chrome -> WDA)
+// ==========================================
+app.post("/api/upload", upload.single("video"), async (req, res) => {
+  console.log(`[API] /api/upload (Chrome USB 模式)`);
+  try {
+    if (!req.file) return res.status(400).json({ error: "无文件" });
 
     const udid = getDeviceUDID();
     if (!udid) {
-      // 清理临时文件
       fs.unlinkSync(req.file.path);
-      return res.status(500).json({
-        error: "无法获取设备 UDID，请检查 config.json 配置",
-      });
+      return res.status(500).json({ error: "未找到设备" });
     }
 
-    console.log(`📤 开始上传文件到设备 ${udid}: ${req.file.originalname}`);
-    console.log(`    文件大小: ${(req.file.size / 1024 / 1024).toFixed(2)} MB`);
-    console.log(`    临时路径: ${req.file.path}`);
+    console.log(`📤 1. 正在通过 tidevice 推送到 Chrome...`);
 
-    // 方法1: 尝试使用 xcrun devicectl (iOS 17+)
-    // 注意：devicectl 命令可能不存在，直接跳过
+    // ✅ 核心修复: 直接写死绝对路径，不再依赖环境变量
+    const TIDEVICE_PATH = "/Users/xiaodekun/Library/Python/3.9/bin/tidevice";
+    const remotePath = `/Documents/${req.file.originalname}`;
+
+    // ✅ 构建命令
+    const cmd = `${TIDEVICE_PATH} -u ${udid} fsync -B ${CHROME_BUNDLE_ID} push "${req.file.path}" "${remotePath}"`;
+
+    console.log(`    执行命令: ${cmd}`);
+
     try {
-      // 先检查命令是否存在
-      await execAsync(`which xcrun 2>&1`);
-      const targetPath = `/private/var/mobile/Media/DCIM/100APPLE/${req.file.originalname}`;
-      const { stdout, stderr } = await execAsync(
-        `xcrun devicectl device install media --device ${udid} "${req.file.path}" "${targetPath}" 2>&1`
-      );
-      if (!stderr || stderr.includes("success") || stdout.includes("success")) {
-        console.log(`✅ 文件上传成功 (devicectl)`);
-        // 清理临时文件
-        fs.unlinkSync(req.file.path);
-        return res.json({
-          success: true,
-          message: `文件已成功传输到设备相册: ${req.file.originalname}`,
-        });
-      } else {
-        throw new Error(stderr || "devicectl 执行失败");
-      }
-    } catch (devicectlError) {
-      console.log(
-        `⚠️ devicectl 方法不可用，尝试使用 ifuse: ${devicectlError.message}`
-      );
+      await execAsync(cmd);
+      console.log(`    ✅ 推送成功!`);
+    } catch (e) {
+      console.error(`    ❌ 推送失败: ${e.message}`);
+      fs.unlinkSync(req.file.path);
+      return res
+        .status(500)
+        .json({ error: `USB 推送失败 (请检查路径或USB): ${e.message}` });
     }
 
-    // 方法2: 使用 ifuse 挂载设备文件系统
-    const mountPoint = path.join(__dirname, "device_mount");
-    try {
-      // 确保挂载点存在
-      if (!fs.existsSync(mountPoint)) {
-        fs.mkdirSync(mountPoint, { recursive: true });
-      }
-
-      // 挂载设备
-      await execAsync(`ifuse "${mountPoint}" -u ${udid} 2>&1`);
-      console.log(`📂 设备已挂载到: ${mountPoint}`);
-
-      // 复制文件到设备的 DCIM 目录（相册）
-      const deviceDCIM = path.join(mountPoint, "DCIM", "100APPLE");
-      if (!fs.existsSync(deviceDCIM)) {
-        // 如果目录不存在，尝试创建或使用其他位置
-        const deviceMedia = path.join(mountPoint, "Media");
-        if (fs.existsSync(deviceMedia)) {
-          const altDCIM = path.join(deviceMedia, "DCIM", "100APPLE");
-          if (!fs.existsSync(altDCIM)) {
-            fs.mkdirSync(altDCIM, { recursive: true });
-          }
-          const targetFile = path.join(altDCIM, req.file.originalname);
-          fs.copyFileSync(req.file.path, targetFile);
-          console.log(`✅ 文件已复制到: ${targetFile}`);
-        } else {
-          throw new Error("无法找到设备的 DCIM 目录");
-        }
-      } else {
-        const targetFile = path.join(deviceDCIM, req.file.originalname);
-        fs.copyFileSync(req.file.path, targetFile);
-        console.log(`✅ 文件已复制到: ${targetFile}`);
-      }
-
-      // 卸载设备
-      await execAsync(`umount "${mountPoint}" 2>&1`);
-      console.log(`📂 设备已卸载`);
-
-      // 清理临时文件
-      fs.unlinkSync(req.file.path);
-
-      return res.json({
-        success: true,
-        message: `文件已成功传输到设备相册: ${req.file.originalname}`,
-      });
-    } catch (ifuseError) {
-      console.error(`❌ ifuse 方法失败: ${ifuseError.message}`);
-      // 清理临时文件
-      fs.unlinkSync(req.file.path);
-      // 尝试卸载（如果挂载失败，这个命令会失败，但不会影响）
-      try {
-        await execAsync(`umount "${mountPoint}" 2>&1`);
-      } catch (e) {}
-
-      return res.status(500).json({
-        error: "文件传输失败",
-        message: `请确保已安装 libimobiledevice (brew install libimobiledevice) 或使用 iOS 17+ 设备支持 xcrun devicectl`,
-        details: ifuseError.message,
-      });
-    }
-  } catch (error) {
-    console.error("文件上传失败:", error.message);
-    // 清理临时文件
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    res.status(500).json({
-      error: "文件上传失败",
-      message: error.message,
+    // 2. 触发 WDA 自动化 (异步)
+    saveFromChromeFolder(req.file.originalname).catch((err) => {
+      console.error("WDA 自动化出错:", err);
     });
+
+    fs.unlinkSync(req.file.path);
+    res.json({
+      success: true,
+      message: "文件已推送到 Chrome，正在自动打开文件 App 保存...",
+    });
+  } catch (error) {
+    console.error("上传流程异常:", error);
+    if (req.file) fs.unlinkSync(req.file.path);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -555,6 +634,44 @@ app.post("/api/app_switcher", async (req, res) => {
   }
 });
 
+// 3. 长按接口 (Long Press)
+app.post("/api/longpress", async (req, res) => {
+  try {
+    const { x, y, viewWidth, viewHeight } = req.body;
+    const deviceSize = await getScreenSize();
+
+    const realX = Math.round((x / viewWidth) * deviceSize.width);
+    const realY = Math.round((y / viewHeight) * deviceSize.height);
+
+    console.log(`📌 长按: (${realX}, ${realY})`);
+
+    const sessionId = await getSessionId();
+
+    // 长按操作：按下后保持一段时间，然后松开
+    await axios.post(`${WDA_CTRL}/session/${sessionId}/actions`, {
+      actions: [
+        {
+          type: "pointer",
+          id: "finger1",
+          parameters: { pointerType: "touch" },
+          actions: [
+            { type: "pointerMove", duration: 0, x: realX, y: realY },
+            { type: "pointerDown", button: 0 },
+            // 关键：保持按下状态 1000ms，模拟长按
+            { type: "pause", duration: 1000 },
+            { type: "pointerUp", button: 0 },
+          ],
+        },
+      ],
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("长按失败:", error.message);
+    cachedSessionId = null;
+    res.status(500).json({ error: "长按失败" });
+  }
+});
+
 // API: 获取设备屏幕尺寸（GET 接口）
 app.get("/api/device/size", async (req, res) => {
   try {
@@ -564,6 +681,33 @@ app.get("/api/device/size", async (req, res) => {
     console.error(`[API] ❌ 获取设备尺寸失败: ${error.message}`);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.status(500).json({ error: "获取设备尺寸失败" });
+  }
+});
+
+// API: 设置粘贴板内容
+app.post("/api/clipboard", async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text || typeof text !== "string") {
+      return res.status(400).json({ error: "无效的文本内容" });
+    }
+
+    console.log(`📋 设置粘贴板内容: ${text.substring(0, 50)}...`);
+
+    const sessionId = await getSessionId();
+
+    // 使用 WDA 的粘贴板 API
+    // WDA 使用 /wda/setPasteboard 接口，需要传递 content 和 encoding
+    await axios.post(`${WDA_CTRL}/wda/setPasteboard`, {
+      content: text,
+      encoding: "utf8",
+    });
+
+    console.log("✅ 粘贴板设置成功");
+    res.json({ success: true, message: "粘贴板内容已设置" });
+  } catch (error) {
+    console.error("设置粘贴板失败:", error.message);
+    res.status(500).json({ error: `设置粘贴板失败: ${error.message}` });
   }
 });
 

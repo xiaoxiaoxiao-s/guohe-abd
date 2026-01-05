@@ -218,6 +218,14 @@
             🏠 Home (回桌面)
           </button>
           <button class="btn" onclick="goAppSwitcher()">🗂 多任务</button>
+          <button
+            class="btn"
+            id="longPressModeBtn"
+            onclick="toggleLongPressMode()"
+            style="margin-top: 10px"
+          >
+            📌 长按模式: 关闭
+          </button>
         </div>
 
         <div class="control-section">
@@ -239,6 +247,34 @@
             </button>
             <div
               id="uploadStatus"
+              style="font-size: 12px; color: #666; min-height: 20px"
+            ></div>
+          </div>
+        </div>
+
+        <div class="control-section">
+          <div class="control-section-title">粘贴板操作</div>
+          <div style="display: flex; flex-direction: column; gap: 10px">
+            <input
+              type="text"
+              id="clipboardInput"
+              placeholder="输入要复制到粘贴板的内容"
+              style="
+                padding: 10px;
+                background: #333;
+                color: white;
+                border: 1px solid #555;
+                border-radius: 8px;
+                font-size: 14px;
+                width: 100%;
+                box-sizing: border-box;
+              "
+            />
+            <button class="btn" onclick="setClipboard()" style="width: 100%">
+              📋 复制到粘贴板
+            </button>
+            <div
+              id="clipboardStatus"
               style="font-size: 12px; color: #666; min-height: 20px"
             ></div>
           </div>
@@ -314,6 +350,42 @@
         startY = 0;
       let startTime = 0;
       let isDragging = false;
+      let longPressMode = false;
+      let longPressTimer = null;
+
+      // 长按模式切换
+      function toggleLongPressMode() {
+        longPressMode = !longPressMode;
+        const btn = document.getElementById("longPressModeBtn");
+        btn.textContent = `📌 长按模式: ${longPressMode ? "开启" : "关闭"}`;
+        btn.style.background = longPressMode ? "#4caf50" : "#444";
+        statusText.innerText = longPressMode
+          ? "📌 长按模式已开启，点击屏幕将执行长按"
+          : "✅ 在线 | 点击 / 快速滑动 / 慢速拖拽";
+        setTimeout(() => {
+          if (statusText.innerText.includes("长按模式")) {
+            statusText.innerText = "✅ 在线 | 点击 / 快速滑动 / 慢速拖拽";
+          }
+        }, 2000);
+      }
+
+      // 鼠标移动处理（用于取消长按）
+      screenImg.addEventListener("mousemove", (e) => {
+        if (isDragging && longPressTimer) {
+          const rect = screenImg.getBoundingClientRect();
+          const currentX = e.clientX - rect.left;
+          const currentY = e.clientY - rect.top;
+          const moveDist = Math.sqrt(
+            Math.pow(currentX - startX, 2) + Math.pow(currentY - startY, 2)
+          );
+
+          // 如果移动距离超过阈值，取消长按定时器
+          if (moveDist > 10) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+          }
+        }
+      });
 
       // 1. 鼠标按下
       screenImg.addEventListener("mousedown", (e) => {
@@ -324,12 +396,53 @@
         startY = e.clientY - rect.top;
         // 记录按下时间
         startTime = new Date().getTime();
+
+        // 如果开启长按模式，设置长按定时器
+        if (longPressMode) {
+          longPressTimer = setTimeout(() => {
+            // 触发长按
+            console.log("📌 触发长按");
+            statusText.innerText = "📌 执行长按操作...";
+            setTimeout(() => (statusText.innerText = "✅ 在线"), 2000);
+
+            performAction("/api/longpress", {
+              x: startX,
+              y: startY,
+              viewWidth: rect.width,
+              viewHeight: rect.height,
+            });
+            longPressTimer = null;
+          }, 1500); // 1500ms后触发长按，避免和点击混淆
+        }
       });
 
       // 2. 鼠标松开 (智能判断意图)
       screenImg.addEventListener("mouseup", async (e) => {
+        // 清除长按定时器
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+
         if (!isDragging) return;
         isDragging = false;
+
+        // 如果长按模式开启，且已经触发了长按，则不执行其他操作
+        if (longPressMode) {
+          const endTime = new Date().getTime();
+          const timeDiff = endTime - startTime;
+          const rect = screenImg.getBoundingClientRect();
+          const endX = e.clientX - rect.left;
+          const endY = e.clientY - rect.top;
+          const diffX = Math.abs(endX - startX);
+          const diffY = Math.abs(endY - startY);
+          const moveDistance = Math.sqrt(diffX * diffX + diffY * diffY);
+
+          // 如果按下时间超过1500ms且移动距离很小，说明已经触发了长按，直接返回
+          if (timeDiff >= 1500 && moveDistance < 10) {
+            return;
+          }
+        }
 
         const rect = screenImg.getBoundingClientRect();
         const endX = e.clientX - rect.left;
@@ -348,15 +461,29 @@
 
         // --- 逻辑分支 ---
 
-        // 1. 如果移动距离很小 -> 点击 (Tap)
+        // 1. 如果移动距离很小 -> 点击 (Tap) 或 长按检测
         if (moveDistance < 10) {
-          console.log("👆 触发点击");
-          performAction("/api/tap", {
-            x: endX,
-            y: endY,
-            viewWidth,
-            viewHeight,
-          });
+          // 检测是否为长按（按下时间超过1500ms，避免和点击混淆）
+          if (timeDiff >= 1500) {
+            console.log("📌 触发长按");
+            statusText.innerText = "📌 执行长按操作...";
+            setTimeout(() => (statusText.innerText = "✅ 在线"), 2000);
+
+            performAction("/api/longpress", {
+              x: endX,
+              y: endY,
+              viewWidth,
+              viewHeight,
+            });
+          } else {
+            console.log("👆 触发点击");
+            performAction("/api/tap", {
+              x: endX,
+              y: endY,
+              viewWidth,
+              viewHeight,
+            });
+          }
           return;
         }
 
@@ -390,7 +517,13 @@
         }
       });
 
-      screenImg.addEventListener("mouseleave", () => (isDragging = false));
+      screenImg.addEventListener("mouseleave", () => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+        isDragging = false;
+      });
 
       // 优化：使用 fire-and-forget 模式，不等待响应
       function performAction(url, data) {
@@ -621,6 +754,61 @@
         return (
           Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i]
         );
+      }
+
+      // 粘贴板功能
+      async function setClipboard() {
+        const input = document.getElementById("clipboardInput");
+        const text = input.value.trim();
+        const statusDiv = document.getElementById("clipboardStatus");
+
+        if (!text) {
+          showClipboardStatus("❌ 请输入要复制的内容", "error");
+          return;
+        }
+
+        showClipboardStatus("📋 正在复制到粘贴板...", "uploading");
+
+        try {
+          const response = await fetch(`${API_BASE}/api/clipboard`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: text }),
+          });
+
+          const result = await response.json();
+
+          if (response.ok && result.success) {
+            showClipboardStatus("✅ 已成功复制到粘贴板", "success");
+          } else {
+            showClipboardStatus(`❌ ${result.error || "复制失败"}`, "error");
+          }
+        } catch (error) {
+          console.error("复制失败:", error);
+          showClipboardStatus(`❌ 复制失败: ${error.message}`, "error");
+        }
+      }
+
+      function showClipboardStatus(message, type) {
+        const statusDiv = document.getElementById("clipboardStatus");
+        statusDiv.textContent = message;
+        statusDiv.style.color =
+          type === "success"
+            ? "#4caf50"
+            : type === "error"
+            ? "#f44336"
+            : type === "uploading"
+            ? "#2196f3"
+            : "#666";
+
+        // 3秒后清除成功消息
+        if (type === "success") {
+          setTimeout(() => {
+            if (statusDiv.textContent === message) {
+              statusDiv.textContent = "";
+            }
+          }, 3000);
+        }
       }
     </script>
   </body>
