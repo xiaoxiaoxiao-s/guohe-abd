@@ -358,9 +358,9 @@ async function configureSettings(sessionId) {
   try {
     await axios.post(`${WDA_CTRL}/session/${sessionId}/appium/settings`, {
       settings: {
-        mjpegServerScreenshotQuality: 10,
-        mjpegServerFramerate: 15,
-        mjpegScalingFactor: 30,
+        mjpegServerScreenshotQuality: 5,
+        mjpegServerFramerate: 10,
+        mjpegScalingFactor: 25,
       },
     });
     console.log("✅ 画质优化配置已发送");
