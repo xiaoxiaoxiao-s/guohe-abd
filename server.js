@@ -124,7 +124,7 @@ function getDeviceUDID() {
 }
 
 // ==========================================
-// 2. WDA 自动化: 去“文件”App的 Chrome 文件夹保存视频
+// 2. WDA 自动化: 去"文件"App的 Chrome 文件夹保存图片/视频
 // ==========================================
 async function saveFromChromeFolder(filename) {
   const sessionId = await getSessionId();
@@ -242,12 +242,12 @@ async function saveFromChromeFolder(filename) {
   if (folderClicked) {
     await new Promise((r) => setTimeout(r, 1000));
 
-    // 4. 点击视频文件 (文件名)
-    console.log(`    🎬 点击文件: ${filename}`);
+    // 4. 点击文件 (文件名)
+    console.log(`    📁 点击文件: ${filename}`);
     const fileClicked = await tapText(filename);
 
     if (fileClicked) {
-      await new Promise((r) => setTimeout(r, 1500)); // 等待视频预览加载
+      await new Promise((r) => setTimeout(r, 1500)); // 等待文件预览加载
 
       console.log(`    🚀 点击分享 (左下角)...`);
       // 5. 点击左下角分享按钮 (坐标适配绝大多数 iPhone)
@@ -255,12 +255,37 @@ async function saveFromChromeFolder(filename) {
 
       await new Promise((r) => setTimeout(r, 1500)); // 等待菜单弹出
 
-      // 6. 点击保存
+      // 6. 根据文件类型点击保存
       console.log(`    💾 点击保存...`);
-      let saved = await tapText("保存视频");
-      if (!saved) saved = await tapText("Save Video");
 
-      if (saved) console.log(`✅ [完成] 视频已存入相册！`);
+      // 判断文件类型（根据扩展名）
+      const ext = filename.toLowerCase().split(".").pop();
+      const imageExts = [
+        "jpg",
+        "jpeg",
+        "png",
+        "gif",
+        "heic",
+        "heif",
+        "webp",
+        "bmp",
+      ];
+      const isImage = imageExts.includes(ext);
+
+      let saved = false;
+      if (isImage) {
+        // 图片：尝试中文和英文选项
+        saved = await tapText("存储图像");
+        if (!saved) saved = await tapText("存储到照片");
+        if (!saved) saved = await tapText("Save to Photos");
+        if (!saved) saved = await tapText("Save Image");
+        if (saved) console.log(`✅ [完成] 图片已存入相册！`);
+      } else {
+        // 视频：尝试中文和英文选项
+        saved = await tapText("保存视频");
+        if (!saved) saved = await tapText("Save Video");
+        if (saved) console.log(`✅ [完成] 视频已存入相册！`);
+      }
     } else {
       console.log(`❌ 未找到文件: ${filename}，可能是上传还没完成？`);
     }
@@ -596,45 +621,7 @@ app.post("/api/home", async (req, res) => {
   }
 });
 
-// 2. 多任务/最近应用 (App Switcher)
-app.post("/api/app_switcher", async (req, res) => {
-  try {
-    console.log("🗂 打开多任务后台");
-    const deviceSize = await getScreenSize();
-    const sessionId = await getSessionId();
-
-    // 逻辑：从屏幕最底部中间，慢慢滑到屏幕中心，然后松开
-    // 这就是 iOS 打开多任务的标准手势
-    const startX = Math.round(deviceSize.width / 2);
-    const startY = deviceSize.height - 5; // 最底部
-    const endY = Math.round(deviceSize.height / 2); // 中间
-
-    await axios.post(`${WDA_CTRL}/session/${sessionId}/actions`, {
-      actions: [
-        {
-          type: "pointer",
-          id: "finger1",
-          parameters: { pointerType: "touch" },
-          actions: [
-            { type: "pointerMove", duration: 0, x: startX, y: startY },
-            { type: "pointerDown", button: 0 },
-            // 慢一点滑，持续 500ms
-            { type: "pointerMove", duration: 500, x: startX, y: endY },
-            // 关键：在中间停顿 500ms，触发多任务
-            { type: "pause", duration: 500 },
-            { type: "pointerUp", button: 0 },
-          ],
-        },
-      ],
-    });
-    res.json({ success: true });
-  } catch (error) {
-    console.error("多任务失败:", error.message);
-    res.status(500).json({ error: "Failed" });
-  }
-});
-
-// 3. 长按接口 (Long Press)
+// 2. 长按接口 (Long Press)
 app.post("/api/longpress", async (req, res) => {
   try {
     const { x, y, viewWidth, viewHeight } = req.body;
@@ -684,33 +671,96 @@ app.get("/api/device/size", async (req, res) => {
   }
 });
 
-// API: 设置粘贴板内容
-app.post("/api/clipboard", async (req, res) => {
+// API: 写入 Mac 粘贴板
+app.post("/api/clipboard/write", async (req, res) => {
+  const { text } = req.body;
+  if (!text) {
+    return res.status(400).json({ error: "必须提供 text 参数" });
+  }
+
   try {
-    const { text } = req.body;
-    if (!text || typeof text !== "string") {
-      return res.status(400).json({ error: "无效的文本内容" });
-    }
+    // 使用 spawn 和 stdin 将内容写入 Mac 粘贴板（更安全，处理特殊字符）
+    const { spawn } = require("child_process");
+    const pbcopy = spawn("pbcopy");
 
-    console.log(`📋 设置粘贴板内容: ${text.substring(0, 50)}...`);
+    // 处理 Promise
+    await new Promise((resolve, reject) => {
+      pbcopy.stdin.write(text, "utf8");
+      pbcopy.stdin.end();
 
-    const sessionId = await getSessionId();
+      pbcopy.on("close", (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`pbcopy 退出码: ${code}`));
+        }
+      });
 
-    // 使用 WDA 的粘贴板 API
-    // WDA 使用 /wda/setPasteboard 接口，需要传递 content 和 encoding
-    await axios.post(`${WDA_CTRL}/wda/setPasteboard`, {
-      content: text,
-      encoding: "utf8",
+      pbcopy.on("error", (error) => {
+        reject(error);
+      });
     });
 
-    console.log("✅ 粘贴板设置成功");
-    res.json({ success: true, message: "粘贴板内容已设置" });
+    console.log(
+      `📋 已写入 Mac 粘贴板: "${text.substring(0, 50)}${
+        text.length > 50 ? "..." : ""
+      }"`
+    );
+    res.json({ success: true, message: "已写入 Mac 粘贴板" });
   } catch (error) {
-    console.error("设置粘贴板失败:", error.message);
-    res.status(500).json({ error: `设置粘贴板失败: ${error.message}` });
+    console.error("❌ 写入 Mac 粘贴板失败:", error.message);
+    res.status(500).json({ error: "写入 Mac 粘贴板失败" });
   }
 });
 
+// API 粘贴api - 读取 Mac 粘贴板并同步到 iOS 设备
+app.post("/api/clipboard", async (req, res) => {
+  try {
+    // 1. 读取 Mac 粘贴板内容（使用已定义的 execAsync）
+    const { stdout: macClipboardText } = await execAsync("pbpaste");
+    const text = macClipboardText.trim();
+
+    if (!text) {
+      return res.status(400).json({ error: "Mac 粘贴板为空" });
+    }
+
+    console.log(
+      `📋 [API] 读取 Mac 粘贴板内容: "${text.substring(0, 50)}${
+        text.length > 50 ? "..." : ""
+      }"`
+    );
+
+    // 2. 获取 Session (复用之前的逻辑)
+    let sessionId;
+    try {
+      const status = await axios.get(`${WDA_CTRL}/status`);
+      sessionId = status.data.sessionId;
+    } catch (e) {}
+
+    if (!sessionId) {
+      const create = await axios.post(`${WDA_CTRL}/session`, {
+        capabilities: {},
+      });
+      sessionId = create.data.sessionId;
+    }
+
+    // 3. 将文本转为 Base64 (WDA 要求内容必须是 Base64 编码)
+    const base64Content = Buffer.from(text).toString("base64");
+
+    // 4. 调用 WDA 接口写入剪贴板
+    await axios.post(`${WDA_CTRL}/session/${sessionId}/wda/setPasteboard`, {
+      content: base64Content,
+      contentType: "plaintext", // 指定类型为纯文本
+      label: "CommandTest",
+    });
+
+    console.log("✅ 剪贴板设置成功！");
+    res.json({ success: true, message: "已从 Mac 粘贴板同步到 iOS 设备" });
+  } catch (error) {
+    console.error("❌ 剪贴板设置失败:", error.message);
+    res.status(500).json({ error: "WDA 连接失败或设置出错" });
+  }
+});
 // server.js 只提供 API 接口，不提供静态文件服务
 // 静态文件由 dashboard-server.js 提供
 

@@ -217,15 +217,6 @@
           <button class="btn btn-home" onclick="goHome()">
             🏠 Home (回桌面)
           </button>
-          <button class="btn" onclick="goAppSwitcher()">🗂 多任务</button>
-          <button
-            class="btn"
-            id="longPressModeBtn"
-            onclick="toggleLongPressMode()"
-            style="margin-top: 10px"
-          >
-            📌 长按模式: 关闭
-          </button>
         </div>
 
         <div class="control-section">
@@ -234,7 +225,7 @@
             <input
               type="file"
               id="videoFileInput"
-              accept="video/*"
+              accept="video/*,image/*"
               style="display: none"
               onchange="handleFileSelect(event)"
             />
@@ -243,7 +234,7 @@
               onclick="document.getElementById('videoFileInput').click()"
               style="width: 100%"
             >
-              📹 选择视频文件
+              📁 选择图片/视频
             </button>
             <div
               id="uploadStatus"
@@ -335,7 +326,8 @@
       screenImg.src = `${API_BASE}/api/stream`;
 
       screenImg.onload = () => {
-        statusText.innerText = "✅ 在线 | 点击 / 快速滑动 / 慢速拖拽";
+        statusText.innerText =
+          "✅ 在线 | 单击 / 双击长按 / 快速滑动 / 慢速拖拽";
         statusText.style.color = "#4caf50";
       };
       screenImg.onerror = () => {
@@ -350,42 +342,8 @@
         startY = 0;
       let startTime = 0;
       let isDragging = false;
-      let longPressMode = false;
-      let longPressTimer = null;
-
-      // 长按模式切换
-      function toggleLongPressMode() {
-        longPressMode = !longPressMode;
-        const btn = document.getElementById("longPressModeBtn");
-        btn.textContent = `📌 长按模式: ${longPressMode ? "开启" : "关闭"}`;
-        btn.style.background = longPressMode ? "#4caf50" : "#444";
-        statusText.innerText = longPressMode
-          ? "📌 长按模式已开启，点击屏幕将执行长按"
-          : "✅ 在线 | 点击 / 快速滑动 / 慢速拖拽";
-        setTimeout(() => {
-          if (statusText.innerText.includes("长按模式")) {
-            statusText.innerText = "✅ 在线 | 点击 / 快速滑动 / 慢速拖拽";
-          }
-        }, 2000);
-      }
-
-      // 鼠标移动处理（用于取消长按）
-      screenImg.addEventListener("mousemove", (e) => {
-        if (isDragging && longPressTimer) {
-          const rect = screenImg.getBoundingClientRect();
-          const currentX = e.clientX - rect.left;
-          const currentY = e.clientY - rect.top;
-          const moveDist = Math.sqrt(
-            Math.pow(currentX - startX, 2) + Math.pow(currentY - startY, 2)
-          );
-
-          // 如果移动距离超过阈值，取消长按定时器
-          if (moveDist > 10) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-          }
-        }
-      });
+      let isDoubleClick = false; // 标记是否为双击
+      let clickTimer = null; // 单击延迟定时器
 
       // 1. 鼠标按下
       screenImg.addEventListener("mousedown", (e) => {
@@ -396,53 +354,12 @@
         startY = e.clientY - rect.top;
         // 记录按下时间
         startTime = new Date().getTime();
-
-        // 如果开启长按模式，设置长按定时器
-        if (longPressMode) {
-          longPressTimer = setTimeout(() => {
-            // 触发长按
-            console.log("📌 触发长按");
-            statusText.innerText = "📌 执行长按操作...";
-            setTimeout(() => (statusText.innerText = "✅ 在线"), 2000);
-
-            performAction("/api/longpress", {
-              x: startX,
-              y: startY,
-              viewWidth: rect.width,
-              viewHeight: rect.height,
-            });
-            longPressTimer = null;
-          }, 1500); // 1500ms后触发长按，避免和点击混淆
-        }
       });
 
       // 2. 鼠标松开 (智能判断意图)
       screenImg.addEventListener("mouseup", async (e) => {
-        // 清除长按定时器
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-
         if (!isDragging) return;
         isDragging = false;
-
-        // 如果长按模式开启，且已经触发了长按，则不执行其他操作
-        if (longPressMode) {
-          const endTime = new Date().getTime();
-          const timeDiff = endTime - startTime;
-          const rect = screenImg.getBoundingClientRect();
-          const endX = e.clientX - rect.left;
-          const endY = e.clientY - rect.top;
-          const diffX = Math.abs(endX - startX);
-          const diffY = Math.abs(endY - startY);
-          const moveDistance = Math.sqrt(diffX * diffX + diffY * diffY);
-
-          // 如果按下时间超过1500ms且移动距离很小，说明已经触发了长按，直接返回
-          if (timeDiff >= 1500 && moveDistance < 10) {
-            return;
-          }
-        }
 
         const rect = screenImg.getBoundingClientRect();
         const endX = e.clientX - rect.left;
@@ -476,13 +393,23 @@
               viewHeight,
             });
           } else {
-            console.log("👆 触发点击");
-            performAction("/api/tap", {
-              x: endX,
-              y: endY,
-              viewWidth,
-              viewHeight,
-            });
+            // 单击处理：延迟执行，如果检测到双击则取消
+            if (clickTimer) {
+              clearTimeout(clickTimer);
+            }
+            clickTimer = setTimeout(() => {
+              // 检查是否刚刚发生了双击
+              if (!isDoubleClick) {
+                console.log("👆 触发点击");
+                performAction("/api/tap", {
+                  x: endX,
+                  y: endY,
+                  viewWidth,
+                  viewHeight,
+                });
+              }
+              clickTimer = null;
+            }, 300); // 300ms延迟，等待双击事件
           }
           return;
         }
@@ -518,11 +445,41 @@
       });
 
       screenImg.addEventListener("mouseleave", () => {
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
         isDragging = false;
+      });
+
+      // 双击事件：触发长按
+      screenImg.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        isDoubleClick = true; // 标记为双击，防止触发单击
+
+        // 清除可能存在的单击定时器
+        if (clickTimer) {
+          clearTimeout(clickTimer);
+          clickTimer = null;
+        }
+
+        const rect = screenImg.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const viewWidth = rect.width;
+        const viewHeight = rect.height;
+
+        console.log("📌 双击触发长按");
+        statusText.innerText = "📌 执行长按操作...";
+        setTimeout(() => (statusText.innerText = "✅ 在线"), 2000);
+
+        performAction("/api/longpress", {
+          x: x,
+          y: y,
+          viewWidth,
+          viewHeight,
+        });
+
+        // 300ms后重置双击标记
+        setTimeout(() => {
+          isDoubleClick = false;
+        }, 300);
       });
 
       // 优化：使用 fire-and-forget 模式，不等待响应
@@ -543,13 +500,6 @@
       async function goHome() {
         console.log("🏠 按下 Home 键");
         await performAction("/api/home", {});
-      }
-
-      // 新增：多任务功能 (原理：Home 键双击，或者上滑悬停)
-      // 这里我们用最简单的逻辑：请求 WDA 打开多任务
-      async function goAppSwitcher() {
-        console.log("🗂 切换多任务");
-        await performAction("/api/app_switcher", {}); // 后面要在 server.js 里写这个接口
       }
 
       // 获取屏幕尺寸（用于计算滑动坐标）
@@ -671,8 +621,11 @@
         }
 
         // 检查文件类型
-        if (!file.type.startsWith("video/")) {
-          showUploadStatus("❌ 请选择视频文件", "error");
+        if (
+          !file.type.startsWith("video/") &&
+          !file.type.startsWith("image/")
+        ) {
+          showUploadStatus("❌ 请选择图片或视频文件", "error");
           return;
         }
 
@@ -770,10 +723,30 @@
         showClipboardStatus("📋 正在复制到粘贴板...", "uploading");
 
         try {
-          const response = await fetch(`${API_BASE}/api/clipboard`, {
+          // 1. 先将内容写入 Mac 粘贴板
+          const writeResponse = await fetch(`${API_BASE}/api/clipboard/write`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: text }),
+          });
+
+          const writeResult = await writeResponse.json();
+
+          if (!writeResponse.ok || !writeResult.success) {
+            showClipboardStatus(
+              `❌ ${writeResult.error || "写入 Mac 粘贴板失败"}`,
+              "error"
+            );
+            return;
+          }
+
+          // 2. 短暂延迟，确保粘贴板已更新
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          // 3. 调用后端接口，后端会读取 Mac 粘贴板并同步到 iOS 设备
+          const response = await fetch(`${API_BASE}/api/clipboard`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
           });
 
           const result = await response.json();
