@@ -246,10 +246,10 @@
         <div class="control-section">
           <div class="control-section-title">粘贴板操作</div>
           <div style="display: flex; flex-direction: column; gap: 10px">
-            <input
-              type="text"
+            <textarea
               id="clipboardInput"
               placeholder="输入要复制到粘贴板的内容"
+              rows="6"
               style="
                 padding: 10px;
                 background: #333;
@@ -259,8 +259,10 @@
                 font-size: 14px;
                 width: 100%;
                 box-sizing: border-box;
+                resize: vertical;
+                font-family: inherit;
               "
-            />
+            ></textarea>
             <button class="btn" onclick="setClipboard()" style="width: 100%">
               📋 复制到粘贴板
             </button>
@@ -317,9 +319,10 @@
       }
 
       // API 基础 URL（使用设备端口）
-      const API_BASE = `http://${window.location.hostname}:${devicePort}`;
+      const API_BASE = `${window.location.origin}/proxy/${devicePort}`;
 
       const screenImg = document.getElementById("screen-view");
+
       const statusText = document.getElementById("status-text");
 
       // 设置视频流 URL

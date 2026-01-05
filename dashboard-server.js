@@ -4,9 +4,35 @@ const cors = require("cors");
 const fs = require("fs");
 const { exec } = require("child_process");
 const os = require("os");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 const app = express();
 app.use(cors());
+
+app.use("/proxy/:targetPort", (req, res, next) => {
+  const targetPort = req.params.targetPort;
+  // 创建动态代理
+  createProxyMiddleware({
+    target: `http://127.0.0.1:${targetPort}`, // 转发目标
+    changeOrigin: true,
+    pathRewrite: {
+      [`^/proxy/${targetPort}`]: "", // 去掉 URL 中的 /proxy/端口号 前缀
+    },
+    // 关键: 处理 MJPEG 视频流不缓冲
+    onProxyRes: (proxyRes, req, res) => {
+      if (req.url.includes("/stream")) {
+        proxyRes.headers["connection"] = "keep-alive";
+        proxyRes.headers["content-type"] =
+          "multipart/x-mixed-replace; boundary=--boundary";
+      }
+    },
+    onError: (err, req, res) => {
+      console.error(`代理错误 (目标端口 ${targetPort}):`, err.message);
+      res.status(500).send("Proxy Error");
+    },
+  })(req, res, next);
+});
+
 app.use(express.json());
 
 // 提供 dashboard 静态文件

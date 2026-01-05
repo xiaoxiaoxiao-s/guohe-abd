@@ -15,6 +15,7 @@
     "child_process": "^1.0.2",
     "cors": "^2.8.5",
     "express": "^5.2.1",
+    "http-proxy-middleware": "^3.0.5",
     "localtunnel": "^2.0.2",
     "multer": "^2.0.2"
   }
