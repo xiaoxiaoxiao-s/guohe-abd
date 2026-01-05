@@ -114,8 +114,27 @@ async function startDashboard() {
   });
 }
 
+// === 启动 Cpolar ===
+async function startCpolar() {
+  const cpolarPort = 3000;
+  const logBase = path.join(config.log_dir, "cpolar");
+
+  // 检查是否已运行
+  if (fs.existsSync(path.join(config.pid_dir, "cpolar_cpolar.pid"))) {
+    console.log(`[!] Cpolar 似乎已在运行，请先 stop。`);
+    return;
+  }
+
+  console.log(`\n[+] 启动 Cpolar (端口: ${cpolarPort})`);
+
+  const cpolarCmd = `nohup cpolar http ${cpolarPort} > "${logBase}.log" 2>&1 & echo $!`;
+  await spawnProcess(cpolarCmd, "cpolar", "cpolar");
+
+  console.log(`    [cpolar] 已启动，日志: ${logBase}.log`);
+}
+
 // === 启动所有任务 ===
-async function startAll() {
+async function startAll(enableCpolar = false) {
   console.log("=== 正在启动 Dashboard & WDA 服务 & 端口转发 & Web 服务器 ===");
 
   // 先启动 Dashboard
@@ -175,7 +194,7 @@ test > "${logBase}_wda.log" 2>&1 & echo $!`;
   const dashboardPort = config.dashboard_port || 3000;
   const localIP = getLocalIP();
 
-  console.log("\n>>> 所有命令已发送。请等待约 10-30 秒让 WDA 初始化。");
+  console.log("\n>>> 所有服务启动命令已发送。请等待约 10-30 秒让 WDA 初始化。");
   console.log(`>>> 访问 Dashboard:`);
   console.log(`    本地: http://localhost:${dashboardPort}`);
   console.log(`    外网: http://${localIP}:${dashboardPort}`);
@@ -183,11 +202,20 @@ test > "${logBase}_wda.log" 2>&1 & echo $!`;
   console.log(">>> 访问 Web 界面:");
   console.log(`    本地: http://localhost:<WEB_PORT>`);
   console.log(`    外网: http://${localIP}:<WEB_PORT>`);
+
+  // 等待所有服务启动完成后再执行 cpolar（如果指定了关键词）
+  if (enableCpolar) {
+    console.log("\n>>> 所有服务已启动完成，现在启动 Cpolar...");
+    await startCpolar();
+    console.log(">>> Cpolar 启动完成");
+  }
 }
 
 // === 停止所有任务 ===
 function stopAll() {
-  console.log("=== 停止所有服务 (Dashboard + WDA + iproxy + server) ===");
+  console.log(
+    "=== 停止所有服务 (Dashboard + WDA + iproxy + server + cpolar) ==="
+  );
 
   // 停止 Dashboard (使用 pm2)
   const dashboardPidPath = path.join(config.pid_dir, "dashboard.pid");
@@ -249,9 +277,21 @@ function stopAll() {
 
 // === 主入口 ===
 const action = process.argv[2];
-if (action === "start") startAll();
-else if (action === "stop") stopAll();
-else if (action === "restart") {
+const keyword = process.argv[3]; // 获取第三个参数作为关键词
+
+if (action === "start") {
+  // 检查是否有 cpolar 关键词
+  const enableCpolar = keyword === "cpolar" || keyword === "--cpolar";
+  startAll(enableCpolar);
+} else if (action === "stop") {
   stopAll();
-  setTimeout(startAll, 2000);
-} else console.log("用法: node manager.js [start|stop|restart]");
+} else if (action === "restart") {
+  stopAll();
+  setTimeout(() => {
+    const enableCpolar = keyword === "cpolar" || keyword === "--cpolar";
+    startAll(enableCpolar);
+  }, 2000);
+} else {
+  console.log("用法: node manager.js [start|stop|restart] [cpolar]");
+  console.log("示例: node manager.js start cpolar  # 启动并执行 cpolar");
+}
