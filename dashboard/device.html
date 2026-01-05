@@ -208,6 +208,20 @@
       <div class="status-bar">
         状态: <span id="status-text">正在连接视频流...</span>
       </div>
+      <div
+        style="
+          margin-top: 10px;
+          font-size: 12px;
+          color: #888;
+          text-align: center;
+          padding: 8px 12px;
+          background: #2a2a2a;
+          border-radius: 6px;
+          border-left: 3px solid #4caf50;
+        "
+      >
+        💡 操作提示：双击屏幕表示长按操作
+      </div>
     </div>
 
     <div class="right-panel">
@@ -276,6 +290,20 @@
             <button class="btn" onclick="setClipboard()" style="width: 100%">
               📋 复制到粘贴板
             </button>
+            <div
+              style="
+                font-size: 11px;
+                color: #888;
+                line-height: 1.4;
+                padding: 6px 8px;
+                background: #2a2a2a;
+                border-radius: 6px;
+                border-left: 3px solid #2196f3;
+              "
+            >
+              💡 提示：粘贴内容时会自动唤起 WebDriverAgentRunner
+              应用，完成后会自动返回主屏幕
+            </div>
             <div
               id="clipboardStatus"
               style="font-size: 12px; color: #666; min-height: 20px"
@@ -357,9 +385,15 @@
       let isDragging = false;
       let isDoubleClick = false; // 标记是否为双击
       let clickTimer = null; // 单击延迟定时器
+      let isClipboardOperationInProgress = false; // 标记粘贴操作是否正在进行
 
       // 1. 鼠标按下
       screenImg.addEventListener("mousedown", (e) => {
+        // 如果正在执行粘贴操作，禁止所有投屏操作
+        if (isClipboardOperationInProgress) {
+          e.preventDefault();
+          return;
+        }
         e.preventDefault();
         isDragging = true;
         const rect = screenImg.getBoundingClientRect();
@@ -371,6 +405,12 @@
 
       // 2. 鼠标松开 (智能判断意图)
       screenImg.addEventListener("mouseup", async (e) => {
+        // 如果正在执行粘贴操作，禁止所有投屏操作
+        if (isClipboardOperationInProgress) {
+          e.preventDefault();
+          isDragging = false;
+          return;
+        }
         if (!isDragging) return;
         isDragging = false;
 
@@ -463,6 +503,11 @@
 
       // 双击事件：触发长按
       screenImg.addEventListener("dblclick", (e) => {
+        // 如果正在执行粘贴操作，禁止所有投屏操作
+        if (isClipboardOperationInProgress) {
+          e.preventDefault();
+          return;
+        }
         e.preventDefault();
         isDoubleClick = true; // 标记为双击，防止触发单击
 
@@ -753,7 +798,18 @@
           return;
         }
 
+        // 如果已经在执行粘贴操作，禁止重复操作
+        if (isClipboardOperationInProgress) {
+          showClipboardStatus("⚠️ 粘贴操作正在进行中，请稍候...", "error");
+          return;
+        }
+
+        // 设置标志，禁止所有投屏操作
+        isClipboardOperationInProgress = true;
         showClipboardStatus("📋 正在通过 WDA 设置到手机粘贴板...", "uploading");
+        // 更新状态栏提示
+        const originalStatus = statusText.innerText;
+        statusText.innerText = "⏳ 粘贴操作中，投屏操作已禁用...";
 
         try {
           // 直接调用后端接口，通过 WDA 将文本设置到手机粘贴板
@@ -776,6 +832,10 @@
         } catch (error) {
           console.error("设置粘贴板失败:", error);
           showClipboardStatus(`❌ 设置失败: ${error.message}`, "error");
+        } finally {
+          // 无论成功或失败，都要恢复投屏操作
+          isClipboardOperationInProgress = false;
+          statusText.innerText = originalStatus || "✅ 在线";
         }
       }
 

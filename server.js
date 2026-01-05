@@ -758,10 +758,30 @@ app.post("/api/clipboard", async (req, res) => {
       console.log(`✅ 创建新 Session: ${sessionId}`);
     }
 
-    // 3. 将文本转为 Base64 (WDA 要求内容必须是 Base64 编码)
+    // 3. 强制打开 WebDriverAgentRunner app
+    console.log("📱 正在激活 WebDriverAgentRunner 应用...");
+    try {
+      await axios.post(
+        `${WDA_CTRL}/session/${sessionId}/appium/device/activate_app`,
+        {
+          bundleId: "com.facebook.WebDriverAgentRunner",
+        }
+      );
+      // 等待应用激活完成
+      await new Promise((r) => setTimeout(r, 1000));
+      console.log("✅ WebDriverAgentRunner 应用已激活");
+    } catch (activateError) {
+      console.warn(
+        "⚠️ 激活 WebDriverAgentRunner 失败，继续尝试设置粘贴板:",
+        activateError.message
+      );
+      // 即使激活失败，也继续尝试设置粘贴板
+    }
+
+    // 4. 将文本转为 Base64 (WDA 要求内容必须是 Base64 编码)
     const base64Content = Buffer.from(text).toString("base64");
 
-    // 4. 调用 WDA 接口写入剪贴板
+    // 5. 调用 WDA 接口写入剪贴板
     await axios.post(`${WDA_CTRL}/session/${sessionId}/wda/setPasteboard`, {
       content: base64Content,
       contentType: "plaintext", // 指定类型为纯文本
@@ -769,9 +789,20 @@ app.post("/api/clipboard", async (req, res) => {
     });
 
     console.log("✅ 通过 WDA 设置手机粘贴板成功！");
+
+    // 6. 粘贴完成后返回 home
+    try {
+      console.log("🏠 正在返回主屏幕...");
+      await axios.post(`${WDA_CTRL}/wda/homescreen`);
+      console.log("✅ 已返回主屏幕");
+    } catch (homeError) {
+      console.warn("⚠️ 返回 home 失败:", homeError.message);
+      // 即使返回 home 失败，也不影响粘贴操作的成功
+    }
+
     res.json({
       success: true,
-      message: "已通过 WDA 将文本设置到 iOS 设备粘贴板",
+      message: "已通过 WDA 将文本设置到 iOS 设备粘贴板，并返回主屏幕",
     });
   } catch (error) {
     console.error("❌ WDA 剪贴板设置失败:", error.message);
