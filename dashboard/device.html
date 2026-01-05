@@ -238,7 +238,17 @@
             </button>
             <div
               id="uploadStatus"
-              style="font-size: 12px; color: #666; min-height: 20px"
+              style="
+                font-size: 12px;
+                color: #666;
+                min-height: 20px;
+                max-height: 60px;
+                overflow-y: auto;
+                word-wrap: break-word;
+                word-break: break-all;
+                line-height: 1.4;
+                padding: 4px 0;
+              "
             ></div>
           </div>
         </div>
@@ -682,7 +692,19 @@
 
       function showUploadStatus(message, type) {
         const statusDiv = document.getElementById("uploadStatus");
-        statusDiv.textContent = message;
+        // 限制消息长度，避免过长文本撑开布局
+        const maxLength = 100;
+        const displayMessage =
+          message.length > maxLength
+            ? message.substring(0, maxLength) + "..."
+            : message;
+        statusDiv.textContent = displayMessage;
+        // 如果消息被截断，添加 title 属性显示完整消息
+        if (message.length > maxLength) {
+          statusDiv.title = message;
+        } else {
+          statusDiv.title = "";
+        }
         statusDiv.style.color =
           type === "success"
             ? "#4caf50"
@@ -692,13 +714,21 @@
             ? "#2196f3"
             : "#666";
 
-        // 3秒后清除成功消息
+        // 3秒后清除成功消息，5秒后清除错误消息
         if (type === "success") {
           setTimeout(() => {
-            if (statusDiv.textContent === message) {
+            if (statusDiv.textContent === displayMessage) {
               statusDiv.textContent = "";
+              statusDiv.title = "";
             }
           }, 3000);
+        } else if (type === "error") {
+          setTimeout(() => {
+            if (statusDiv.textContent === displayMessage) {
+              statusDiv.textContent = "";
+              statusDiv.title = "";
+            }
+          }, 5000);
         }
       }
 

@@ -10,6 +10,7 @@
 - 🎮 快捷操作：Home 键、多任务、方向滑动等
 - 📊 Dashboard：统一管理所有设备，查看在线状态
 - 🔄 设备控制：支持启动、停止、重新连接设备
+- 🌐 Cpolar 内网穿透：可选启用，支持通过公网访问服务（需指定关键词）
 
 ## 前置要求
 
@@ -59,6 +60,18 @@ cd WebDriverAgent
 ```bash
 npm install -g pm2
 ```
+
+#### 安装 Cpolar（可选，用于内网穿透）
+
+如果需要使用内网穿透功能，需要安装 cpolar：
+
+```bash
+# 访问 https://www.cpolar.com/ 下载并安装
+# 或使用 Homebrew（如果可用）
+brew install cpolar
+```
+
+安装后需要配置认证令牌（authtoken），参考 [Cpolar 官方文档](https://www.cpolar.com/docs)。
 
 ### 3. 设备准备
 
@@ -134,17 +147,31 @@ npm install
 
 ### 启动所有服务
 
+**基础启动**（不启用 cpolar）：
+
 ```bash
 node manager.js start
 ```
 
-这会启动：
+**启动并启用 Cpolar 内网穿透**：
 
-1. Dashboard 服务（端口 3000，可通过 pm2 管理）
-2. 所有启用设备的服务：
-   - iproxy 端口转发（WDA 和视频流）
+```bash
+node manager.js start cpolar
+# 或
+node manager.js start --cpolar
+```
+
+启动顺序：
+
+1. Dashboard 服务（端口 3000，通过 pm2 管理）
+2. 所有启用设备的服务（串行启动）：
+   - iproxy 端口转发（WDA 控制端口）
+   - iproxy 端口转发（视频流端口）
    - WebDriverAgent 服务
    - Web 服务器
+3. **最后执行** Cpolar（如果指定了 `cpolar` 关键词）
+
+> 💡 **注意**：Cpolar 会在所有服务启动完成后才执行，确保所有服务都已就绪。
 
 ### 停止所有服务
 
@@ -152,10 +179,25 @@ node manager.js start
 node manager.js stop
 ```
 
+这会停止所有服务，包括：
+- Dashboard（通过 pm2）
+- 所有设备的 WDA、iproxy、Web 服务器
+- Cpolar（如果已启动）
+
 ### 重启所有服务
+
+**基础重启**：
 
 ```bash
 node manager.js restart
+```
+
+**重启并启用 Cpolar**：
+
+```bash
+node manager.js restart cpolar
+# 或
+node manager.js restart --cpolar
 ```
 
 ## 使用说明
@@ -174,6 +216,14 @@ http://localhost:3000
 
 ```
 http://<your-server-ip>:3000
+```
+
+**通过 Cpolar 访问**（如果启用了 cpolar）：
+
+启动 cpolar 后，会生成一个公网访问地址，可以在 cpolar 的 Web 界面查看，或查看日志：
+
+```bash
+tail -f logs/cpolar.log
 ```
 
 > 💡 **提示**：所有服务默认监听 `0.0.0.0`，支持外网访问。请确保防火墙已开放相应端口。
@@ -204,6 +254,10 @@ http://localhost:8102  # 假设设备 local_port 是 8100
 http://<your-server-ip>:8102
 ```
 
+**通过 Cpolar 访问**：
+
+如果启用了 cpolar，可以通过 cpolar 生成的公网地址访问。
+
 > 💡 **提示**：Dashboard 会自动检测当前访问地址（本地或外网），并生成对应的设备链接。
 
 ### 3. 设备控制界面功能
@@ -224,22 +278,32 @@ guohe-abd/
 ├── server.js                # 设备 Web 服务器
 ├── dashboard-server.js      # Dashboard 服务器
 ├── package.json             # 项目依赖
-├── public/                  # 设备控制界面
-│   └── index.html
 ├── dashboard/               # Dashboard 界面
-│   └── index.html
+│   ├── index.html
+│   └── device.html
 ├── logs/                    # 日志目录
-│   ├── dashboard.log
-│   └── {device_name}_*.log
+│   ├── dashboard.log        # Dashboard 日志
+│   ├── dashboard_error.log  # Dashboard 错误日志
+│   ├── dashboard_out.log    # Dashboard 输出日志
+│   ├── cpolar.log           # Cpolar 日志（如果启用）
+│   └── {device_name}_*.log  # 设备相关日志
+│       ├── {device_name}_iproxy_ctrl.log    # iproxy 控制端口日志
+│       ├── {device_name}_iproxy_mjpeg.log   # iproxy 视频流日志
+│       ├── {device_name}_wda.log            # WDA 服务日志
+│       └── {device_name}_server.log         # Web 服务器日志
 └── pids/                    # PID 文件目录
-    └── {device_name}_*.pid
+    ├── dashboard.pid        # Dashboard PID
+    ├── cpolar_cpolar.pid    # Cpolar PID（如果启用）
+    └── {device_name}_*.pid  # 设备进程 PID
 ```
 
 ## 外网访问配置
 
-### 防火墙设置
+### 方式一：直接外网访问（需要公网 IP）
 
-如果需要在其他设备上访问服务，需要确保防火墙开放相应端口：
+如果服务器有公网 IP，可以直接通过 IP 地址访问。
+
+#### 防火墙设置
 
 **macOS**：
 
@@ -265,9 +329,46 @@ sudo firewall-cmd --permanent --add-port=8100-8200/tcp
 sudo firewall-cmd --reload
 ```
 
+### 方式二：使用 Cpolar 内网穿透（推荐，无需公网 IP）
+
+Cpolar 可以创建内网穿透隧道，无需公网 IP 即可通过公网访问。
+
+#### 使用步骤
+
+1. **安装 Cpolar**（参考前置要求）
+
+2. **配置认证令牌**：
+
+   ```bash
+   cpolar authtoken <your-authtoken>
+   ```
+
+3. **启动服务时启用 Cpolar**：
+
+   ```bash
+   node manager.js start cpolar
+   ```
+
+4. **查看公网地址**：
+
+   ```bash
+   # 查看 cpolar 日志获取公网地址
+   tail -f logs/cpolar.log
+   
+   # 或访问 cpolar Web 界面
+   # 默认地址：http://127.0.0.1:4040
+   ```
+
+5. **通过公网地址访问**：
+
+   使用 cpolar 生成的公网地址访问 Dashboard 和设备控制界面。
+
+> 💡 **提示**：Cpolar 免费版会生成随机域名，每次重启可能会变化。付费版可以绑定固定域名。
+
 ### 端口说明
 
 - **Dashboard 端口**：`dashboard_port`（默认 3000）
+- **Cpolar 端口**：3000（转发 Dashboard 端口）
 - **设备端口**：每个设备需要 3 个连续端口
   - `local_port`：WDA 控制端口
   - `local_port + 1`：视频流端口
@@ -281,53 +382,7 @@ sudo firewall-cmd --reload
 2. **访问控制**：使用防火墙限制访问 IP
 3. **认证机制**：考虑添加登录认证（当前版本无认证）
 4. **VPN 访问**：建议通过 VPN 访问，而不是直接暴露到公网
-
-## 外网访问配置
-
-### 防火墙设置
-
-如果需要在其他设备上访问服务，需要确保防火墙开放相应端口：
-
-**macOS**：
-
-```bash
-# 查看防火墙状态
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate
-
-# 开放端口（以 3000 为例）
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add /usr/sbin/httpd
-sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp /usr/sbin/httpd
-```
-
-**Linux**：
-
-```bash
-# Ubuntu/Debian
-sudo ufw allow 3000/tcp
-sudo ufw allow 8100:8200/tcp  # 根据设备数量调整端口范围
-
-# CentOS/RHEL
-sudo firewall-cmd --permanent --add-port=3000/tcp
-sudo firewall-cmd --permanent --add-port=8100-8200/tcp
-sudo firewall-cmd --reload
-```
-
-### 端口说明
-
-- **Dashboard 端口**：`dashboard_port`（默认 3000）
-- **设备端口**：每个设备需要 3 个连续端口
-  - `local_port`：WDA 控制端口
-  - `local_port + 1`：视频流端口
-  - `local_port + 2`：Web 访问端口
-
-### 安全建议
-
-⚠️ **重要**：外网访问时请注意安全：
-
-1. **使用 HTTPS**：建议使用反向代理（如 Nginx）配置 HTTPS
-2. **访问控制**：使用防火墙限制访问 IP
-3. **认证机制**：考虑添加登录认证（当前版本无认证）
-4. **VPN 访问**：建议通过 VPN 访问，而不是直接暴露到公网
+5. **Cpolar 安全**：使用 Cpolar 时，建议配置访问密码或 IP 白名单
 
 ## 常见问题
 
@@ -379,7 +434,7 @@ node manager.js start
 
 - 检查 Dashboard 是否启动：`pm2 list`
 - 检查端口是否被占用：`lsof -i :3000`
-- 查看 Dashboard 日志：`logs/dashboard.log`
+- 查看 Dashboard 日志：`logs/dashboard.log`、`logs/dashboard_error.log`
 
 ### 5. 视频流无法显示
 
@@ -402,6 +457,29 @@ node manager.js start
 - 检查设备性能
 - 查看服务器日志确认请求是否正常处理
 
+### 7. Cpolar 启动失败
+
+**问题**：Cpolar 无法启动或无法访问
+
+**解决方案**：
+
+- 确认已安装 cpolar：`which cpolar` 或 `cpolar version`
+- 检查是否配置了认证令牌：`cpolar authtoken <token>`
+- 查看 Cpolar 日志：`tail -f logs/cpolar.log`
+- 确认 Dashboard 端口（3000）未被占用
+- 检查 Cpolar Web 界面：`http://127.0.0.1:4040`
+
+### 8. Cpolar 公网地址无法访问
+
+**问题**：通过 Cpolar 生成的公网地址无法访问
+
+**解决方案**：
+
+- 确认 Cpolar 服务正在运行：检查 `pids/cpolar_cpolar.pid`
+- 查看 Cpolar 日志确认隧道是否建立成功
+- 检查防火墙是否阻止了 Cpolar 连接
+- 确认 Cpolar 账户状态正常（免费版有流量限制）
+
 ## 开发说明
 
 ### 添加新设备
@@ -416,10 +494,16 @@ node manager.js start
 ```bash
 # Dashboard 日志
 tail -f logs/dashboard.log
+tail -f logs/dashboard_error.log
 
 # 设备日志
 tail -f logs/{device_name}_wda.log
 tail -f logs/{device_name}_server.log
+tail -f logs/{device_name}_iproxy_ctrl.log
+tail -f logs/{device_name}_iproxy_mjpeg.log
+
+# Cpolar 日志（如果启用）
+tail -f logs/cpolar.log
 ```
 
 ### 手动停止单个设备
@@ -430,6 +514,39 @@ cat pids/{device_name}_wda.pid
 
 # 停止进程
 kill -9 <PID>
+```
+
+### 手动停止 Cpolar
+
+```bash
+# 查看 Cpolar PID
+cat pids/cpolar_cpolar.pid
+
+# 停止 Cpolar
+kill -9 <PID>
+```
+
+## 命令参考
+
+### manager.js 命令
+
+```bash
+# 启动服务（不启用 cpolar）
+node manager.js start
+
+# 启动服务并启用 cpolar
+node manager.js start cpolar
+node manager.js start --cpolar
+
+# 停止所有服务
+node manager.js stop
+
+# 重启服务（不启用 cpolar）
+node manager.js restart
+
+# 重启服务并启用 cpolar
+node manager.js restart cpolar
+node manager.js restart --cpolar
 ```
 
 ## 许可证
