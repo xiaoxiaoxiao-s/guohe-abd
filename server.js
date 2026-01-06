@@ -761,14 +761,13 @@ app.post("/api/clipboard", async (req, res) => {
     // 3. 强制打开 WebDriverAgentRunner app
     console.log("📱 正在激活 WebDriverAgentRunner 应用...");
     try {
-      await axios.post(
-        `${WDA_CTRL}/session/${sessionId}/appium/device/activate_app`,
-        {
-          bundleId: "com.woodrain.xiao.xctrunner",
-        }
-      );
+      await axios.post(`${WDA_CTRL}/session/${sessionId}/wda/apps/launch`, {
+        bundleId: "com.woodrain.xiao.xctrunner",
+        // arguments: [], // 可选：启动参数
+        // environment: {} // 可选：环境变量
+      });
       // 等待应用激活完成
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 1500));
       console.log("✅ WebDriverAgentRunner 应用已激活");
     } catch (activateError) {
       console.warn(
@@ -778,6 +777,7 @@ app.post("/api/clipboard", async (req, res) => {
       // 即使激活失败，也继续尝试设置粘贴板
     }
 
+    await new Promise((r) => setTimeout(r, 1500));
     // 4. 将文本转为 Base64 (WDA 要求内容必须是 Base64 编码)
     const base64Content = Buffer.from(text).toString("base64");
 
