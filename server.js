@@ -764,7 +764,7 @@ app.post("/api/clipboard", async (req, res) => {
       await axios.post(
         `${WDA_CTRL}/session/${sessionId}/appium/device/activate_app`,
         {
-          bundleId: "com.facebook.WebDriverAgentRunner",
+          bundleId: "com.woodrain.xiao.xctrunner",
         }
       );
       // 等待应用激活完成
