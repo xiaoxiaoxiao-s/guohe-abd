@@ -54,8 +54,9 @@
       #screen-view {
         display: block;
         object-fit: contain;
+        width: 375px;
+        height: auto;
         max-height: 90vh;
-        max-width: 100%;
         cursor: pointer;
         user-select: none;
         -webkit-user-drag: none;
@@ -195,6 +196,14 @@
 
         .control-section {
           min-width: 200px;
+        }
+      }
+
+      /* 超小屏幕：当屏幕宽度小于投屏宽度时，允许缩小以适应屏幕 */
+      @media (max-width: 400px) {
+        #screen-view {
+          width: 100%;
+          max-width: 375px;
         }
       }
     </style>
