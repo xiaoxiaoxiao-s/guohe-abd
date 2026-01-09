@@ -136,11 +136,11 @@ async function configureWdaSettings(sessionId) {
     await axios.post(`${WDA_CTRL}/session/${sessionId}/appium/settings`, {
       settings: {
         // 截图质量 (1-100)，越低越快
-        mjpegServerScreenshotQuality: 25,
+        mjpegServerScreenshotQuality: 10,
         // 帧率限制，防止 USB 拥堵
-        mjpegServerFramerate: 15,
+        mjpegServerFramerate: 10,
         // 缩放比例 (1-100)，50表示宽高各缩小一半，数据量减少75%
-        mjpegScalingFactor: 50,
+        mjpegScalingFactor: 25,
         // 截图类型优化
         screenshotQuality: 1,
         // 禁用动画检测，提升操作响应
