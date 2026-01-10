@@ -47,7 +47,7 @@ const httpAgent = new http.Agent({
 
 const wdaClient = axios.create({
   baseURL: WDA_CTRL,
-  timeout: 20000, // 10秒超时
+  timeout: 20000, // 20秒超时，给VPN环境更多宽容度
   httpAgent: httpAgent,
   headers: {
     Connection: "keep-alive",
@@ -108,6 +108,7 @@ let _currentSessionId = null;
 async function getSessionId() {
   if (_currentSessionId) {
     try {
+      // 快速保活检查
       await wdaClient.get(`/session/${_currentSessionId}/status`, {
         timeout: 1000,
       });
@@ -147,23 +148,28 @@ async function getSessionId() {
 }
 
 /**
- * [关键] WDA 极致性能配置 (针对 TikTok)
+ * [优化] WDA 极致性能配置 (包含减少动作延迟)
  */
 async function configureWdaSettings(sessionId) {
   try {
-    console.log(`⚙️ 应用 WDA 防卡死/低画质配置...`);
+    console.log(`⚙️ 应用 WDA 防卡死/低画质/零延迟配置...`);
     await wdaClient.post(`/session/${sessionId}/appium/settings`, {
       settings: {
-        mjpegScalingFactor: 25, // 画面缩小至 25%
-        mjpegServerScreenshotQuality: 10, // 最低画质
-        mjpegServerFramerate: 10, // 限制帧率
-        screenshotQuality: 0,
-        waitForIdleTimeout: 0,
-        animationCoolOffTimeout: 0,
-        // [新增] 限制 UI 层级解析深度，防止 TikTok 卡死
-        snapshotMaxDepth: 50,
-        // [新增] 减少按键延迟
-        interKeyDelay: 0,
+        // --- 视频流极限阉割 ---
+        mjpegScalingFactor: 25, // 画面原有尺寸的 1/4
+        mjpegServerScreenshotQuality: 5, // 画质降到 5 (极度模糊，但速度快)
+        mjpegServerFramerate: 2, // [关键] 帧率降到 2 FPS (防卡死核心)
+
+        // --- 动作响应优化 ---
+        screenshotQuality: 0, // 截图质量最低
+        waitForIdleTimeout: 0, // 永不等待空闲
+        animationCoolOffTimeout: 0, // 无动画冷却
+        actionAcknowledgmentTimeout: 0, // 不等待动作确认
+
+        // --- 禁用 UI 树分析 (针对日志里的 hierarchy 错误) ---
+        snapshotMaxDepth: 1, // [关键] 只看最顶层，不准深入分析
+        useJSONSource: true, // 使用 JSON 格式源码 (通常比 XML 快)
+        simpleIsVisibleCheck: true, // 简单的可见性检查
       },
     });
   } catch (e) {
@@ -225,10 +231,8 @@ async function clickElement(sessionId, elementId) {
 // 4. Chrome 文件保存逻辑
 // ==========================================
 async function saveFromChromeFolder(filename) {
-  // ... (保持原有 Chrome 逻辑不变) ...
-  // 为了节省篇幅，这里复用您之前的逻辑，因为这部分没问题
-  // 核心改动在于 wdaClient 的引入和 session 配置
   const sessionId = await getSessionId();
+  // 这里必须 await，因为后续坐标计算依赖它，但 Chrome 环境不像 TikTok 那么高压，所以可以等待
   const screen = await getScreenSize();
 
   await wdaClient.post(`/session/${sessionId}/appium/device/activate_app`, {
@@ -244,7 +248,6 @@ async function saveFromChromeFolder(filename) {
     return false;
   };
 
-  // 简化版流程
   await findAndTap("浏览", 1000);
   let entered = await findAndTap("我的 iPhone");
   if (!entered) entered = await findAndTap("On My iPhone");
@@ -266,7 +269,7 @@ async function saveFromChromeFolder(filename) {
                 y: screen.height - 50,
               },
               { type: "pointerDown", button: 0 },
-              { type: "pause", duration: 100 },
+              { type: "pause", duration: 100 }, // 普通 APP 可以保留一点延迟确保稳定
               { type: "pointerUp", button: 0 },
             ],
           },
@@ -285,7 +288,7 @@ async function saveFromChromeFolder(filename) {
 }
 
 // ==========================================
-// 5. API 路由
+// 5. API 路由 (Fire-and-Forget 模式改造)
 // ==========================================
 
 function getDeviceUDID() {
@@ -341,189 +344,222 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
 });
 
 // ==========================================
-// [新增] TikTok 专用：盲操作接口 (解决超时)
+// [优化核心] TikTok 盲操作 - 极速模式
 // ==========================================
 
-// 1. 盲点 (Blind Tap) - 传入百分比 (0.0 - 1.0)
+// 1. 盲点 (Blind Tap)
 app.post("/api/tiktok/tap", async (req, res) => {
+  // [关键] 立即返回成功，不等待 WDA 响应！
+  res.json({ success: true });
+
   try {
-    const { xPct, yPct } = req.body; // 例如: { xPct: 0.5, yPct: 0.5 } 点中心
-    const screen = await getScreenSize();
-    const sid = await getSessionId();
+    const { xPct, yPct } = req.body;
+
+    // [优化] 优先使用缓存尺寸，避免网络请求
+    // 只有当 _deviceSize 为空时才去请求，如果请求也失败就用默认值
+    let screen = _deviceSize;
+    if (!screen) {
+      try {
+        screen = await getScreenSize();
+      } catch (e) {}
+    }
+    if (!screen) screen = { width: 375, height: 812 };
+
+    const sid = _currentSessionId;
+    if (!sid) return; // 如果 Session 正在建立中，直接丢弃这次点击，防止阻塞
 
     const realX = Math.round(screen.width * xPct);
     const realY = Math.round(screen.height * yPct);
 
-    console.log(
-      `🎯 [TikTok Blind Tap] (${xPct}, ${yPct}) -> (${realX}, ${realY})`
-    );
+    console.log(`⚡️ [极速点击] (${realX}, ${realY})`);
 
-    await wdaClient.post(`/session/${sid}/actions`, {
-      actions: [
-        {
-          type: "pointer",
-          id: "finger1",
-          parameters: { pointerType: "touch" },
-          actions: [
-            { type: "pointerMove", duration: 0, x: realX, y: realY },
-            { type: "pointerDown", button: 0 },
-            { type: "pause", duration: 50 },
-            { type: "pointerUp", button: 0 },
-          ],
-        },
-      ],
-    });
-    res.json({ success: true });
+    // [优化] 不使用 await，且去掉了 pause (实现瞬时点击)
+    wdaClient
+      .post(`/session/${sid}/actions`, {
+        actions: [
+          {
+            type: "pointer",
+            id: "finger1",
+            parameters: { pointerType: "touch" },
+            actions: [
+              { type: "pointerMove", duration: 0, x: realX, y: realY },
+              { type: "pointerDown", button: 0 },
+              // { type: "pause", duration: 50 }, // <--- 已移除暂停，极大减少卡死概率
+              { type: "pointerUp", button: 0 },
+            ],
+          },
+        ],
+      })
+      .catch((e) => console.warn("后台点击指令执行异常:", e.message));
   } catch (e) {
-    console.error("Blind Tap Failed:", e.message);
-    res.status(500).json({ error: e.message });
+    console.error("本地逻辑错误:", e.message);
   }
 });
 
-// 2. 盲滑 (Next Video) - 极速上滑
+// 2. 盲滑 (Next Video)
 app.post("/api/tiktok/next", async (req, res) => {
-  // Fire-and-forget: 立即返回成功，不等待 WDA
+  // [关键] 立即返回成功
   res.json({ success: true });
 
   try {
-    const screen = await getScreenSize();
-    const sid = await getSessionId();
+    let screen = _deviceSize || { width: 375, height: 812 };
+    const sid = _currentSessionId;
+    if (!sid) return;
 
-    await wdaClient.post(`/session/${sid}/actions`, {
-      actions: [
-        {
-          type: "pointer",
-          id: "finger1",
-          parameters: { pointerType: "touch" },
-          actions: [
-            // 从屏幕 80% 处开始
-            {
-              type: "pointerMove",
-              duration: 0,
-              x: screen.width / 2,
-              y: screen.height * 0.8,
-            },
-            { type: "pointerDown", button: 0 },
-            // 快速划到 20% 处，耗时 150ms
-            {
-              type: "pointerMove",
-              duration: 150,
-              x: screen.width / 2,
-              y: screen.height * 0.2,
-            },
-            { type: "pointerUp", button: 0 },
-          ],
-        },
-      ],
-    });
+    wdaClient
+      .post(`/session/${sid}/actions`, {
+        actions: [
+          {
+            type: "pointer",
+            id: "finger1",
+            parameters: { pointerType: "touch" },
+            actions: [
+              {
+                type: "pointerMove",
+                duration: 0,
+                x: screen.width / 2,
+                y: screen.height * 0.8,
+              },
+              { type: "pointerDown", button: 0 },
+              {
+                type: "pointerMove",
+                duration: 150,
+                x: screen.width / 2,
+                y: screen.height * 0.2,
+              },
+              { type: "pointerUp", button: 0 },
+            ],
+          },
+        ],
+      })
+      .catch((e) => console.warn("后台滑动指令异常:", e.message));
   } catch (e) {
-    console.error("Next Video Failed:", e.message);
+    console.error("Next Video Error:", e.message);
   }
 });
 
 // ==========================================
-// 常规接口
+// 常规接口 (同样应用 Fire-and-Forget)
 // ==========================================
 
 app.post("/api/tap", async (req, res) => {
+  res.json({ success: true }); // 立即返回
+
   try {
     const { x, y, viewWidth, viewHeight } = req.body;
-    const screen = await getScreenSize();
+    let screen = _deviceSize || { width: 375, height: 812 };
+
+    // 即使没缓存，也不要 await getScreenSize() 阻塞，直接用默认值或异步去取
+    if (!_deviceSize) getScreenSize(); // 触发一次异步更新，这次先用默认的或旧的
+
     const realX = Math.round((x / viewWidth) * screen.width);
     const realY = Math.round((y / viewHeight) * screen.height);
-    const sid = await getSessionId();
 
-    await wdaClient.post(`/session/${sid}/actions`, {
-      actions: [
-        {
-          type: "pointer",
-          id: "finger1",
-          parameters: { pointerType: "touch" },
-          actions: [
-            { type: "pointerMove", duration: 0, x: realX, y: realY },
-            { type: "pointerDown", button: 0 },
-            { type: "pause", duration: 50 },
-            { type: "pointerUp", button: 0 },
-          ],
-        },
-      ],
-    });
-    res.json({ success: true });
+    const sid = _currentSessionId;
+    if (!sid) return;
+
+    wdaClient
+      .post(`/session/${sid}/actions`, {
+        actions: [
+          {
+            type: "pointer",
+            id: "finger1",
+            parameters: { pointerType: "touch" },
+            actions: [
+              { type: "pointerMove", duration: 0, x: realX, y: realY },
+              { type: "pointerDown", button: 0 },
+              // { type: "pause", duration: 50 }, // 移除暂停
+              { type: "pointerUp", button: 0 },
+            ],
+          },
+        ],
+      })
+      .catch((e) => {
+        if (e.message.includes("session")) _currentSessionId = null;
+        console.warn("常规点击异常:", e.message);
+      });
   } catch (e) {
-    console.error("Tap failed:", e.message);
-    if (e.message.includes("session")) _currentSessionId = null;
-    res.status(500).json({ error: e.message });
+    console.error("Tap logic error:", e.message);
   }
 });
 
 app.post("/api/swipe", async (req, res) => {
   res.json({ success: true });
+
   try {
     const { startX, startY, endX, endY, viewWidth, viewHeight } = req.body;
-    const screen = await getScreenSize();
-    const sid = await getSessionId();
+    let screen = _deviceSize || { width: 375, height: 812 };
+    const sid = _currentSessionId;
+    if (!sid) return;
+
     const rSX = Math.round((startX / viewWidth) * screen.width);
     const rSY = Math.round((startY / viewHeight) * screen.height);
     const rEX = Math.round((endX / viewWidth) * screen.width);
     const rEY = Math.round((endY / viewHeight) * screen.height);
 
-    await wdaClient.post(`/session/${sid}/actions`, {
-      actions: [
-        {
-          type: "pointer",
-          id: "finger1",
-          parameters: { pointerType: "touch" },
-          actions: [
-            { type: "pointerMove", duration: 0, x: rSX, y: rSY },
-            { type: "pointerDown", button: 0 },
-            { type: "pointerMove", duration: 100, x: rEX, y: rEY },
-            { type: "pointerUp", button: 0 },
-          ],
-        },
-      ],
-    });
+    wdaClient
+      .post(`/session/${sid}/actions`, {
+        actions: [
+          {
+            type: "pointer",
+            id: "finger1",
+            parameters: { pointerType: "touch" },
+            actions: [
+              { type: "pointerMove", duration: 0, x: rSX, y: rSY },
+              { type: "pointerDown", button: 0 },
+              { type: "pointerMove", duration: 100, x: rEX, y: rEY },
+              { type: "pointerUp", button: 0 },
+            ],
+          },
+        ],
+      })
+      .catch((e) => console.warn("Swipe error:", e.message));
   } catch (e) {
-    console.error("Swipe bg error:", e.message);
+    console.error("Swipe logic error:", e.message);
   }
 });
 
 app.post("/api/home", async (req, res) => {
+  res.json({ success: true });
   try {
-    await wdaClient.post(`/wda/homescreen`);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+    wdaClient.post(`/wda/homescreen`).catch(() => {});
+  } catch (e) {}
 });
 
 app.post("/api/clipboard", async (req, res) => {
-  try {
-    const text = req.body.text || (await execAsync("pbpaste")).stdout.trim();
-    if (!text) return res.status(400).json({ error: "Empty text" });
-    const sid = await getSessionId();
-    const base64Content = Buffer.from(text).toString("base64");
+  res.json({ success: true }); // 立即返回
+
+  // 后台处理
+  (async () => {
     try {
-      await wdaClient.post(`/session/${sid}/wda/setPasteboard`, {
-        content: base64Content,
-        contentType: "plaintext",
-        label: "RemoteCopy",
-      });
+      const text = req.body.text || (await execAsync("pbpaste")).stdout.trim();
+      if (!text) return;
+
+      let sid = await getSessionId(); // 剪贴板需要确保 Session 可用
+      const base64Content = Buffer.from(text).toString("base64");
+
+      try {
+        await wdaClient.post(`/session/${sid}/wda/setPasteboard`, {
+          content: base64Content,
+          contentType: "plaintext",
+          label: "RemoteCopy",
+        });
+      } catch (e) {
+        await wdaClient.post(`/session/${sid}/wda/apps/launch`, {
+          bundleId: "com.woodrain.xiao.xctrunner",
+        });
+        await sleep(1000);
+        await wdaClient.post(`/session/${sid}/wda/setPasteboard`, {
+          content: base64Content,
+          contentType: "plaintext",
+          label: "RemoteCopy",
+        });
+      }
+      await wdaClient.post(`/wda/homescreen`);
     } catch (e) {
-      await wdaClient.post(`/session/${sid}/wda/apps/launch`, {
-        bundleId: "com.woodrain.xiao.xctrunner",
-      });
-      await sleep(1000);
-      await wdaClient.post(`/session/${sid}/wda/setPasteboard`, {
-        content: base64Content,
-        contentType: "plaintext",
-        label: "RemoteCopy",
-      });
+      console.error("Clipboard bg error:", e.message);
     }
-    await wdaClient.post(`/wda/homescreen`);
-    res.json({ success: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  })();
 });
 
 function getLocalIP() {
