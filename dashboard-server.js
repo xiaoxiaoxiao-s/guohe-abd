@@ -164,7 +164,9 @@ app.post("/api/device/start", async (req, res) => {
 
     // 检查是否已运行
     const pidDir = config.pid_dir || "./pids";
-    if (fs.existsSync(path.join(__dirname, pidDir, `${deviceName}_wda.pid`))) {
+    if (
+      fs.existsSync(path.join(__dirname, pidDir, `${deviceName}_server.pid`))
+    ) {
       return res.status(400).json({ error: "设备已在运行中" });
     }
 
@@ -196,15 +198,7 @@ app.post("/api/device/start", async (req, res) => {
     const iproxyMjpegCmd = `nohup iproxy ${MJPEG_PORT} 9100 -u ${device.udid} > "${logBase}_iproxy_mjpeg.log" 2>&1 & echo $!`;
     await spawnProcess(iproxyMjpegCmd, deviceName, "iproxy_mjpeg", config);
 
-    // 3. 启动 xcodebuild (WDA 服务)
-    const wdaCmd = `nohup xcodebuild -project "${config.project_path}" \
--scheme "${config.scheme}" \
--destination "platform=iOS,id=${device.udid}" \
--allowProvisioningUpdates \
-test > "${logBase}_wda.log" 2>&1 & echo $!`;
-    await spawnProcess(wdaCmd, deviceName, "wda", config);
-
-    // 4. 启动 Node.js Web 服务器
+    // 3. 启动 Node.js Web 服务器
     const serverCmd = `nohup env PORT=${WEB_PORT} WDA_PORT=${WDA_PORT} MJPEG_PORT=${MJPEG_PORT} node "${path.join(
       __dirname,
       "server.js"
