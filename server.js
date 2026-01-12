@@ -34,7 +34,10 @@ console.log(`   - 视频流:    ${MJPEG_URL}`);
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+
+// 增加请求体大小限制和超时时间（用于大文件上传）
+app.use(express.json({ limit: "3gb" }));
+app.use(express.urlencoded({ extended: true, limit: "3gb" }));
 
 // ==========================================
 // 高级网络客户端配置
@@ -140,7 +143,8 @@ async function getSessionId() {
     });
     _currentSessionId = createRes.data.sessionId;
     await configureWdaSettings(_currentSessionId);
-    return _currentSessionId;
+    return _cu;
+    rrentSessionId;
   } catch (error) {
     console.error("❌ 无法创建 Session", error.message);
     throw error;
@@ -158,7 +162,7 @@ async function configureWdaSettings(sessionId) {
         // --- 视频流极限阉割 ---
         mjpegScalingFactor: 25, // 画面原有尺寸的 1/4
         mjpegServerScreenshotQuality: 5, // 画质降到 5 (极度模糊，但速度快)
-        mjpegServerFramerate: 2, // [关键] 帧率降到 2 FPS (防卡死核心)
+        mjpegServerFramerate: 5, // [关键] 帧率降到 2 FPS (防卡死核心)
 
         // --- 动作响应优化 ---
         screenshotQuality: 0, // 截图质量最低
@@ -322,6 +326,10 @@ app.get("/api/stream", (req, res) => {
 });
 
 app.post("/api/upload", upload.single("video"), async (req, res) => {
+  // 为大文件上传设置更长的超时时间（30分钟）
+  req.setTimeout(30 * 60 * 1000); // 30分钟
+  res.setTimeout(30 * 60 * 1000); // 30分钟
+
   if (!req.file) return res.status(400).json({ error: "No file" });
   const udid = getDeviceUDID();
   if (!udid) {
@@ -572,6 +580,14 @@ function getLocalIP() {
   return "localhost";
 }
 
-app.listen(SERVER_PORT, "0.0.0.0", () => {
+// 创建HTTP服务器并设置超时时间（支持大文件上传）
+const server = http.createServer(app);
+// 设置服务器超时时间为30分钟（1800000毫秒），用于支持大文件上传
+server.timeout = 30 * 60 * 1000; // 30分钟
+server.keepAliveTimeout = 30 * 60 * 1000; // 30分钟
+server.headersTimeout = 30 * 60 * 1000; // 30分钟
+
+server.listen(SERVER_PORT, "0.0.0.0", () => {
   console.log(`🚀 服务运行中: http://${getLocalIP()}:${SERVER_PORT}`);
+  console.log(`⏱️  上传超时设置: 30分钟（支持大文件上传）`);
 });

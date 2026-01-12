@@ -49,13 +49,14 @@
         width: 100%;
         display: flex;
         justify-content: center;
+        align-items: center;
+        gap: 20px;
       }
 
       #screen-view {
         display: block;
         object-fit: contain;
-        width: 375px;
-        max-width: 375px;
+        max-width: 100%;
         max-height: 90vh;
         cursor: pointer;
         user-select: none;
@@ -94,6 +95,24 @@
         width: 180px;
         height: 180px;
         margin: 0 auto;
+      }
+
+      /* 左侧方向滑动按钮组（只有左滑和上滑） */
+      .swipe-controls-left {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 80px;
+        align-items: center;
+      }
+
+      /* 右侧方向滑动按钮组（只有右滑和下滑） */
+      .swipe-controls-right {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 80px;
+        align-items: center;
       }
 
       .swipe-btn {
@@ -139,6 +158,30 @@
       .swipe-btn-right {
         grid-column: 3;
         grid-row: 2;
+      }
+
+      /* 左侧按钮样式 - 上滑按钮占满一行 */
+      .swipe-btn-up-left {
+        width: 60px;
+        height: 60px;
+      }
+
+      /* 左侧按钮样式 - 左滑按钮 */
+      .swipe-btn-left-left {
+        width: 60px;
+        height: 60px;
+      }
+
+      /* 右侧按钮样式 - 右滑按钮 */
+      .swipe-btn-right-right {
+        width: 60px;
+        height: 60px;
+      }
+
+      /* 右侧按钮样式 - 下滑按钮 */
+      .swipe-btn-down-right {
+        width: 60px;
+        height: 60px;
       }
 
       .btn {
@@ -197,6 +240,18 @@
         .control-section {
           min-width: 200px;
         }
+
+        .phone-wrapper {
+          flex-wrap: wrap;
+        }
+
+        .swipe-controls-left,
+        .swipe-controls-right {
+          width: 100%;
+          flex-direction: row;
+          justify-content: center;
+          margin-top: 10px;
+        }
       }
 
       /* 超小屏幕：当屏幕宽度小于投屏宽度时，允许缩小以适应屏幕 */
@@ -212,7 +267,39 @@
     <div class="left-panel">
       <h2>📱 iOS Remote Control</h2>
       <div class="phone-wrapper">
+        <div class="swipe-controls-left">
+          <button
+            class="swipe-btn swipe-btn-up-left"
+            onclick="swipeDirection('up')"
+            title="向上滑动"
+          >
+            ↑
+          </button>
+          <button
+            class="swipe-btn swipe-btn-left-left"
+            onclick="swipeDirection('left')"
+            title="向左滑动"
+          >
+            ←
+          </button>
+        </div>
         <img id="screen-view" src="" alt="等待连接手机画面..." />
+        <div class="swipe-controls-right">
+          <button
+            class="swipe-btn swipe-btn-right-right"
+            onclick="swipeDirection('right')"
+            title="向右滑动"
+          >
+            →
+          </button>
+          <button
+            class="swipe-btn swipe-btn-down-right"
+            onclick="swipeDirection('down')"
+            title="向下滑动"
+          >
+            ↓
+          </button>
+        </div>
       </div>
       <div class="status-bar">
         状态: <span id="status-text">正在连接视频流...</span>
@@ -299,6 +386,13 @@
             <button class="btn" onclick="setClipboard()" style="width: 100%">
               📋 复制到粘贴板
             </button>
+            <!-- <button
+              class="btn"
+              onclick="openControlCenter()"
+              style="width: 100%; background: #ff9800"
+            >
+              ⬇️ 唤起控制中心
+            </button> -->
             <div
               style="
                 font-size: 11px;
@@ -317,40 +411,6 @@
               id="clipboardStatus"
               style="font-size: 12px; color: #666; min-height: 20px"
             ></div>
-          </div>
-        </div>
-
-        <div class="control-section">
-          <div class="control-section-title">方向滑动</div>
-          <div class="swipe-controls">
-            <button
-              class="swipe-btn swipe-btn-up"
-              onclick="swipeDirection('up')"
-              title="向上滑动"
-            >
-              ↑
-            </button>
-            <button
-              class="swipe-btn swipe-btn-left"
-              onclick="swipeDirection('left')"
-              title="向左滑动"
-            >
-              ←
-            </button>
-            <button
-              class="swipe-btn swipe-btn-right"
-              onclick="swipeDirection('right')"
-              title="向右滑动"
-            >
-              →
-            </button>
-            <button
-              class="swipe-btn swipe-btn-down"
-              onclick="swipeDirection('down')"
-              title="向下滑动"
-            >
-              ↓
-            </button>
           </div>
         </div>
       </div>
@@ -661,6 +721,51 @@
         const startYView = (startY / size.height) * viewHeight;
         const endXView = (endX / size.width) * viewWidth;
         const endYView = (endY / size.height) * viewHeight;
+
+        // 立即执行，不等待
+        performAction("/api/swipe", {
+          startX: startXView,
+          startY: startYView,
+          endX: endXView,
+          endY: endYView,
+          viewWidth,
+          viewHeight,
+        });
+
+        // 如果尺寸还没加载，异步更新（不影响当前操作）
+        if (!deviceSize) {
+          getDeviceSize().then((actualSize) => {
+            // 尺寸加载完成后，下次操作会使用实际尺寸
+          });
+        }
+      }
+
+      // 从右上角向下滑动 - 用于唤起控制中心
+      function openControlCenter() {
+        const screenImg = document.getElementById("screen-view");
+        const rect = screenImg.getBoundingClientRect();
+        const viewWidth = rect.width;
+        const viewHeight = rect.height;
+
+        // 使用缓存的尺寸，如果没有则使用默认值
+        const defaultSize = { width: 375, height: 812 };
+        const size = deviceSize || defaultSize;
+
+        // 从屏幕右上角（约顶部10%高度，右侧10%宽度位置）向下滑动到屏幕中部
+        const startX = size.width * 0.9; // 从右侧90%位置开始（右上角区域）
+        const startY = size.height * 0.1; // 从顶部10%位置开始
+        const endX = size.width * 0.9; // 保持右侧位置
+        const endY = size.height * 0.5; // 滑动到50%位置（屏幕中部）
+
+        // 将设备坐标转换为视图坐标
+        const startXView = (startX / size.width) * viewWidth;
+        const startYView = (startY / size.height) * viewHeight;
+        const endXView = (endX / size.width) * viewWidth;
+        const endYView = (endY / size.height) * viewHeight;
+
+        console.log("⬇️ 执行右上角向下滑动，唤起控制中心");
+        statusText.innerText = "⬇️ 正在唤起控制中心...";
+        setTimeout(() => (statusText.innerText = "✅ 在线"), 2000);
 
         // 立即执行，不等待
         performAction("/api/swipe", {
