@@ -456,6 +456,47 @@
       let clickTimer = null; // 单击延迟定时器
       let isClipboardOperationInProgress = false; // 标记粘贴操作是否正在进行
 
+      // 计算图片实际显示尺寸（考虑 object-fit: contain 的效果）
+      function getActualImageSize(img) {
+        const rect = img.getBoundingClientRect();
+        const containerWidth = rect.width;
+        const containerHeight = rect.height;
+        const naturalWidth = img.naturalWidth || img.width;
+        const naturalHeight = img.naturalHeight || img.height;
+
+        if (!naturalWidth || !naturalHeight) {
+          // 如果图片还没加载，返回容器尺寸
+          return {
+            width: containerWidth,
+            height: containerHeight,
+            offsetX: 0,
+            offsetY: 0,
+          };
+        }
+
+        // 计算保持宽高比的实际显示尺寸
+        const imageAspect = naturalWidth / naturalHeight;
+        const containerAspect = containerWidth / containerHeight;
+
+        let actualWidth, actualHeight, offsetX, offsetY;
+
+        if (imageAspect > containerAspect) {
+          // 图片更宽，以宽度为准
+          actualWidth = containerWidth;
+          actualHeight = containerWidth / imageAspect;
+          offsetX = 0;
+          offsetY = (containerHeight - actualHeight) / 2;
+        } else {
+          // 图片更高，以高度为准
+          actualHeight = containerHeight;
+          actualWidth = containerHeight * imageAspect;
+          offsetX = (containerWidth - actualWidth) / 2;
+          offsetY = 0;
+        }
+
+        return { width: actualWidth, height: actualHeight, offsetX, offsetY };
+      }
+
       // 1. 鼠标按下
       screenImg.addEventListener("mousedown", (e) => {
         // 如果正在执行粘贴操作，禁止所有投屏操作
@@ -466,8 +507,13 @@
         e.preventDefault();
         isDragging = true;
         const rect = screenImg.getBoundingClientRect();
-        startX = e.clientX - rect.left;
-        startY = e.clientY - rect.top;
+        const actualSize = getActualImageSize(screenImg);
+        // 计算相对于实际图片内容的坐标
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        // 调整坐标，减去偏移量
+        startX = clickX - actualSize.offsetX;
+        startY = clickY - actualSize.offsetY;
         // 记录按下时间
         startTime = new Date().getTime();
       });
@@ -484,10 +530,15 @@
         isDragging = false;
 
         const rect = screenImg.getBoundingClientRect();
-        const endX = e.clientX - rect.left;
-        const endY = e.clientY - rect.top;
-        const viewWidth = rect.width;
-        const viewHeight = rect.height;
+        const actualSize = getActualImageSize(screenImg);
+        // 计算相对于实际图片内容的坐标
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        const endX = clickX - actualSize.offsetX;
+        const endY = clickY - actualSize.offsetY;
+        // 使用实际图片显示尺寸
+        const viewWidth = actualSize.width;
+        const viewHeight = actualSize.height;
 
         // 计算耗时
         const endTime = new Date().getTime();
@@ -587,10 +638,15 @@
         }
 
         const rect = screenImg.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        const viewWidth = rect.width;
-        const viewHeight = rect.height;
+        const actualSize = getActualImageSize(screenImg);
+        // 计算相对于实际图片内容的坐标
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        const x = clickX - actualSize.offsetX;
+        const y = clickY - actualSize.offsetY;
+        // 使用实际图片显示尺寸
+        const viewWidth = actualSize.width;
+        const viewHeight = actualSize.height;
 
         console.log("📌 双击触发长按");
         statusText.innerText = "📌 执行长按操作...";
@@ -670,9 +726,10 @@
       // 四个方向滑动 - 优化版本，减少延迟
       function swipeDirection(direction) {
         const screenImg = document.getElementById("screen-view");
-        const rect = screenImg.getBoundingClientRect();
-        const viewWidth = rect.width;
-        const viewHeight = rect.height;
+        const actualSize = getActualImageSize(screenImg);
+        // 使用实际图片显示尺寸
+        const viewWidth = actualSize.width;
+        const viewHeight = actualSize.height;
 
         // 使用缓存的尺寸，如果没有则使用默认值（避免等待）
         const defaultSize = { width: 375, height: 812 };
@@ -716,11 +773,13 @@
             break;
         }
 
-        // 将设备坐标转换为视图坐标
-        const startXView = (startX / size.width) * viewWidth;
-        const startYView = (startY / size.height) * viewHeight;
-        const endXView = (endX / size.width) * viewWidth;
-        const endYView = (endY / size.height) * viewHeight;
+        // 将设备坐标转换为视图坐标（相对于实际图片内容区域）
+        const startXView =
+          (startX / size.width) * viewWidth + actualSize.offsetX;
+        const startYView =
+          (startY / size.height) * viewHeight + actualSize.offsetY;
+        const endXView = (endX / size.width) * viewWidth + actualSize.offsetX;
+        const endYView = (endY / size.height) * viewHeight + actualSize.offsetY;
 
         // 立即执行，不等待
         performAction("/api/swipe", {
@@ -743,9 +802,10 @@
       // 从右上角向下滑动 - 用于唤起控制中心
       function openControlCenter() {
         const screenImg = document.getElementById("screen-view");
-        const rect = screenImg.getBoundingClientRect();
-        const viewWidth = rect.width;
-        const viewHeight = rect.height;
+        const actualSize = getActualImageSize(screenImg);
+        // 使用实际图片显示尺寸
+        const viewWidth = actualSize.width;
+        const viewHeight = actualSize.height;
 
         // 使用缓存的尺寸，如果没有则使用默认值
         const defaultSize = { width: 375, height: 812 };
@@ -757,11 +817,13 @@
         const endX = size.width * 0.9; // 保持右侧位置
         const endY = size.height * 0.5; // 滑动到50%位置（屏幕中部）
 
-        // 将设备坐标转换为视图坐标
-        const startXView = (startX / size.width) * viewWidth;
-        const startYView = (startY / size.height) * viewHeight;
-        const endXView = (endX / size.width) * viewWidth;
-        const endYView = (endY / size.height) * viewHeight;
+        // 将设备坐标转换为视图坐标（相对于实际图片内容区域）
+        const startXView =
+          (startX / size.width) * viewWidth + actualSize.offsetX;
+        const startYView =
+          (startY / size.height) * viewHeight + actualSize.offsetY;
+        const endXView = (endX / size.width) * viewWidth + actualSize.offsetX;
+        const endYView = (endY / size.height) * viewHeight + actualSize.offsetY;
 
         console.log("⬇️ 执行右上角向下滑动，唤起控制中心");
         statusText.innerText = "⬇️ 正在唤起控制中心...";
