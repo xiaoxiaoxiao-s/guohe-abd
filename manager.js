@@ -135,7 +135,7 @@ async function startCpolar() {
 
 // === 启动所有任务 ===
 async function startAll(enableCpolar = false) {
-  console.log("=== 正在启动 Dashboard & WDA 服务 & 端口转发 & Web 服务器 ===");
+  console.log("=== 正在启动 Dashboard & 端口转发 & Web 服务器 ===");
 
   // 先启动 Dashboard
   await startDashboard();
@@ -175,13 +175,13 @@ async function startAll(enableCpolar = false) {
     const iproxyMjpegCmd = `nohup iproxy ${MJPEG_PORT} 9100 -u ${device.udid} > "${logBase}_iproxy_mjpeg.log" 2>&1 & echo $!`;
     await spawnProcess(iproxyMjpegCmd, device.name, "iproxy_mjpeg");
 
-    // 3. 启动 xcodebuild (WDA 服务)
-    const wdaCmd = `nohup xcodebuild -project "${config.project_path}" \
--scheme "${config.scheme}" \
--destination "platform=iOS,id=${device.udid}" \
--allowProvisioningUpdates \
-test > "${logBase}_wda.log" 2>&1 & echo $!`;
-    await spawnProcess(wdaCmd, device.name, "wda");
+    // 3. 启动 xcodebuild (WDA 服务) - 已禁用
+    // const wdaCmd = `nohup xcodebuild -project "${config.project_path}" \
+    // -scheme "${config.scheme}" \
+    // -destination "platform=iOS,id=${device.udid}" \
+    // -allowProvisioningUpdates \
+    // test > "${logBase}_wda.log" 2>&1 & echo $!`;
+    // await spawnProcess(wdaCmd, device.name, "wda");
 
     // 4. 启动 Node.js Web 服务器
     const serverCmd = `nohup env PORT=${WEB_PORT} WDA_PORT=${WDA_PORT} MJPEG_PORT=${MJPEG_PORT} node "${path.join(
@@ -194,7 +194,7 @@ test > "${logBase}_wda.log" 2>&1 & echo $!`;
   const dashboardPort = config.dashboard_port || 3000;
   const localIP = getLocalIP();
 
-  console.log("\n>>> 所有服务启动命令已发送。请等待约 10-30 秒让 WDA 初始化。");
+  console.log("\n>>> 所有服务启动命令已发送。");
   console.log(`>>> 访问 Dashboard:`);
   console.log(`    本地: http://localhost:${dashboardPort}`);
   console.log(`    外网: http://${localIP}:${dashboardPort}`);
@@ -213,9 +213,7 @@ test > "${logBase}_wda.log" 2>&1 & echo $!`;
 
 // === 停止所有任务 ===
 function stopAll() {
-  console.log(
-    "=== 停止所有服务 (Dashboard + WDA + iproxy + server + cpolar) ==="
-  );
+  console.log("=== 停止所有服务 (Dashboard + iproxy + server + cpolar) ===");
 
   // 停止 Dashboard (使用 pm2)
   const dashboardPidPath = path.join(config.pid_dir, "dashboard.pid");
