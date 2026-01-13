@@ -182,19 +182,36 @@ async function configureWdaSettings(sessionId) {
 }
 
 let _deviceSize = null;
+let _deviceSizePromise = null;
 async function getScreenSize() {
   if (_deviceSize) return _deviceSize;
-  try {
-    const sid = await getSessionId();
-    const res = await wdaClient.get(`/session/${sid}/window/rect`);
-    _deviceSize = {
-      width: res.data.value.width,
-      height: res.data.value.height,
-    };
-    return _deviceSize;
-  } catch (e) {
-    return { width: 375, height: 812 };
+
+  // 如果正在获取中，返回同一个 Promise
+  if (_deviceSizePromise) {
+    return _deviceSizePromise;
   }
+
+  _deviceSizePromise = (async () => {
+    try {
+      const sid = await getSessionId();
+      const res = await wdaClient.get(`/session/${sid}/window/rect`);
+      _deviceSize = {
+        width: res.data.value.width,
+        height: res.data.value.height,
+      };
+      _deviceSizePromise = null;
+      console.log(
+        `📱 设备尺寸已获取: ${_deviceSize.width}x${_deviceSize.height}`
+      );
+      return _deviceSize;
+    } catch (e) {
+      console.warn("⚠️ 获取设备尺寸失败，使用默认值:", e.message);
+      _deviceSizePromise = null;
+      return { width: 375, height: 812 };
+    }
+  })();
+
+  return _deviceSizePromise;
 }
 
 // ==========================================
@@ -325,6 +342,16 @@ app.get("/api/stream", (req, res) => {
   req.on("close", () => proxyReq.destroy());
 });
 
+app.get("/api/device/size", async (req, res) => {
+  try {
+    const screen = await getScreenSize();
+    res.json({ width: screen.width, height: screen.height });
+  } catch (e) {
+    console.error("获取设备尺寸失败:", e.message);
+    res.json({ width: 375, height: 812 }); // 返回默认尺寸
+  }
+});
+
 app.post("/api/upload", upload.single("video"), async (req, res) => {
   // 为大文件上传设置更长的超时时间（30分钟）
   req.setTimeout(30 * 60 * 1000); // 30分钟
@@ -450,18 +477,58 @@ app.post("/api/tiktok/next", async (req, res) => {
 // 常规接口 (同样应用 Fire-and-Forget)
 // ==========================================
 
+// 坐标转换辅助函数：将视图坐标转换为设备坐标（提高精度）
+function convertViewToDevice(
+  x,
+  y,
+  viewWidth,
+  viewHeight,
+  deviceWidth,
+  deviceHeight
+) {
+  // 计算比例（使用高精度计算，避免浮点误差）
+  const scaleX = deviceWidth / viewWidth;
+  const scaleY = deviceHeight / viewHeight;
+
+  // 转换坐标（先计算再取整，提高精度）
+  let realX = x * scaleX;
+  let realY = y * scaleY;
+
+  // 四舍五入到最近的整数
+  realX = Math.round(realX);
+  realY = Math.round(realY);
+
+  // 边界检查，确保坐标在有效范围内
+  realX = Math.max(0, Math.min(realX, deviceWidth - 1));
+  realY = Math.max(0, Math.min(realY, deviceHeight - 1));
+
+  return { x: realX, y: realY };
+}
+
 app.post("/api/tap", async (req, res) => {
   res.json({ success: true }); // 立即返回
 
   try {
     const { x, y, viewWidth, viewHeight } = req.body;
-    let screen = _deviceSize || { width: 375, height: 812 };
 
-    // 即使没缓存，也不要 await getScreenSize() 阻塞，直接用默认值或异步去取
-    if (!_deviceSize) getScreenSize(); // 触发一次异步更新，这次先用默认的或旧的
+    // 优先使用缓存的设备尺寸，如果没有则尝试获取（不阻塞）
+    let screen = _deviceSize;
+    if (!screen) {
+      // 异步获取设备尺寸，但不等待
+      getScreenSize().catch(() => {});
+      // 使用默认值（但应该尽快获取真实尺寸）
+      screen = { width: 375, height: 812 };
+    }
 
-    const realX = Math.round((x / viewWidth) * screen.width);
-    const realY = Math.round((y / viewHeight) * screen.height);
+    // 使用改进的坐标转换函数
+    const { x: realX, y: realY } = convertViewToDevice(
+      x,
+      y,
+      viewWidth,
+      viewHeight,
+      screen.width,
+      screen.height
+    );
 
     const sid = _currentSessionId;
     if (!sid) return;
@@ -496,14 +563,31 @@ app.post("/api/swipe", async (req, res) => {
 
   try {
     const { startX, startY, endX, endY, viewWidth, viewHeight } = req.body;
-    let screen = _deviceSize || { width: 375, height: 812 };
+    let screen = _deviceSize;
+    if (!screen) {
+      getScreenSize().catch(() => {});
+      screen = { width: 375, height: 812 };
+    }
     const sid = _currentSessionId;
     if (!sid) return;
 
-    const rSX = Math.round((startX / viewWidth) * screen.width);
-    const rSY = Math.round((startY / viewHeight) * screen.height);
-    const rEX = Math.round((endX / viewWidth) * screen.width);
-    const rEY = Math.round((endY / viewHeight) * screen.height);
+    // 使用改进的坐标转换函数
+    const start = convertViewToDevice(
+      startX,
+      startY,
+      viewWidth,
+      viewHeight,
+      screen.width,
+      screen.height
+    );
+    const end = convertViewToDevice(
+      endX,
+      endY,
+      viewWidth,
+      viewHeight,
+      screen.width,
+      screen.height
+    );
 
     wdaClient
       .post(`/session/${sid}/actions`, {
@@ -513,9 +597,9 @@ app.post("/api/swipe", async (req, res) => {
             id: "finger1",
             parameters: { pointerType: "touch" },
             actions: [
-              { type: "pointerMove", duration: 0, x: rSX, y: rSY },
+              { type: "pointerMove", duration: 0, x: start.x, y: start.y },
               { type: "pointerDown", button: 0 },
-              { type: "pointerMove", duration: 100, x: rEX, y: rEY },
+              { type: "pointerMove", duration: 100, x: end.x, y: end.y },
               { type: "pointerUp", button: 0 },
             ],
           },
@@ -532,15 +616,32 @@ app.post("/api/drag", async (req, res) => {
 
   try {
     const { startX, startY, endX, endY, viewWidth, viewHeight } = req.body;
-    let screen = _deviceSize || { width: 375, height: 812 };
+    let screen = _deviceSize;
+    if (!screen) {
+      getScreenSize().catch(() => {});
+      screen = { width: 375, height: 812 };
+    }
     const sessionId = await getSessionId();
 
     if (!sessionId) return;
 
-    const rSX = Math.round((startX / viewWidth) * screen.width);
-    const rSY = Math.round((startY / viewHeight) * screen.height);
-    const rEX = Math.round((endX / viewWidth) * screen.width);
-    const rEY = Math.round((endY / viewHeight) * screen.height);
+    // 使用改进的坐标转换函数
+    const start = convertViewToDevice(
+      startX,
+      startY,
+      viewWidth,
+      viewHeight,
+      screen.width,
+      screen.height
+    );
+    const end = convertViewToDevice(
+      endX,
+      endY,
+      viewWidth,
+      viewHeight,
+      screen.width,
+      screen.height
+    );
 
     // 拖拽使用更长的 duration (400ms) 来实现慢速拖拽效果
     wdaClient
@@ -551,9 +652,9 @@ app.post("/api/drag", async (req, res) => {
             id: "finger1",
             parameters: { pointerType: "touch" },
             actions: [
-              { type: "pointerMove", duration: 0, x: rSX, y: rSY },
+              { type: "pointerMove", duration: 0, x: start.x, y: start.y },
               { type: "pointerDown", button: 0 },
-              { type: "pointerMove", duration: 400, x: rEX, y: rEY },
+              { type: "pointerMove", duration: 400, x: end.x, y: end.y },
               { type: "pointerUp", button: 0 },
             ],
           },
@@ -570,13 +671,21 @@ app.post("/api/longpress", async (req, res) => {
 
   try {
     const { x, y, viewWidth, viewHeight } = req.body;
-    let screen = _deviceSize || { width: 375, height: 812 };
+    let screen = _deviceSize;
+    if (!screen) {
+      getScreenSize().catch(() => {});
+      screen = { width: 375, height: 812 };
+    }
 
-    // 即使没缓存，也不要 await getScreenSize() 阻塞，直接用默认值或异步去取
-    if (!_deviceSize) getScreenSize(); // 触发一次异步更新，这次先用默认的或旧的
-
-    const realX = Math.round((x / viewWidth) * screen.width);
-    const realY = Math.round((y / viewHeight) * screen.height);
+    // 使用改进的坐标转换函数
+    const { x: realX, y: realY } = convertViewToDevice(
+      x,
+      y,
+      viewWidth,
+      viewHeight,
+      screen.width,
+      screen.height
+    );
 
     const sid = _currentSessionId;
     if (!sid) return;
