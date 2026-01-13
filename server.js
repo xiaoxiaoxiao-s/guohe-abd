@@ -527,6 +527,44 @@ app.post("/api/swipe", async (req, res) => {
   }
 });
 
+app.post("/api/drag", async (req, res) => {
+  res.json({ success: true });
+
+  try {
+    const { startX, startY, endX, endY, viewWidth, viewHeight } = req.body;
+    let screen = _deviceSize || { width: 375, height: 812 };
+    const sessionId = await getSessionId();
+
+    if (!sessionId) return;
+
+    const rSX = Math.round((startX / viewWidth) * screen.width);
+    const rSY = Math.round((startY / viewHeight) * screen.height);
+    const rEX = Math.round((endX / viewWidth) * screen.width);
+    const rEY = Math.round((endY / viewHeight) * screen.height);
+
+    // 拖拽使用更长的 duration (400ms) 来实现慢速拖拽效果
+    wdaClient
+      .post(`/session/${sessionId}/actions`, {
+        actions: [
+          {
+            type: "pointer",
+            id: "finger1",
+            parameters: { pointerType: "touch" },
+            actions: [
+              { type: "pointerMove", duration: 0, x: rSX, y: rSY },
+              { type: "pointerDown", button: 0 },
+              { type: "pointerMove", duration: 400, x: rEX, y: rEY },
+              { type: "pointerUp", button: 0 },
+            ],
+          },
+        ],
+      })
+      .catch((e) => console.warn("Drag error:", e.message));
+  } catch (e) {
+    console.error("Drag logic error:", e.message);
+  }
+});
+
 app.post("/api/home", async (req, res) => {
   res.json({ success: true });
   try {

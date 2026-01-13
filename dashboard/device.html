@@ -270,7 +270,7 @@
         <div class="swipe-controls-left">
           <button
             class="swipe-btn swipe-btn-up-left"
-            onclick="swipeDirection('up')"
+            onclick="swipeDirection('down')"
             title="向上滑动"
           >
             ↑
@@ -286,18 +286,18 @@
         <img id="screen-view" src="" alt="等待连接手机画面..." />
         <div class="swipe-controls-right">
           <button
+            class="swipe-btn swipe-btn-down-right"
+            onclick="swipeDirection('up')"
+            title="向下滑动"
+          >
+            ↓
+          </button>
+          <button
             class="swipe-btn swipe-btn-right-right"
             onclick="swipeDirection('right')"
             title="向右滑动"
           >
             →
-          </button>
-          <button
-            class="swipe-btn swipe-btn-down-right"
-            onclick="swipeDirection('down')"
-            title="向下滑动"
-          >
-            ↓
           </button>
         </div>
       </div>
@@ -420,9 +420,17 @@
       // 从 URL 参数获取设备端口
       const urlParams = new URLSearchParams(window.location.search);
       const devicePort = urlParams.get("port");
+      const deviceName = urlParams.get("name");
       if (!devicePort) {
         alert("缺少端口参数，请从 Dashboard 正确访问");
         window.location.href = "/";
+      }
+
+      if (!deviceName) {
+        alert("缺少设备名称参数，请从 Dashboard 正确访问");
+        window.location.href = "/";
+      } else {
+        document.title = `📱 ${deviceName} Remote Control`;
       }
 
       // API 基础 URL（使用设备端口）
@@ -455,27 +463,22 @@
       let isDoubleClick = false; // 标记是否为双击
       let clickTimer = null; // 单击延迟定时器
       let isClipboardOperationInProgress = false; // 标记粘贴操作是否正在进行
+      let savedViewSize = null; // 保存按下时的视图尺寸，确保滑动时使用一致的尺寸
 
       // 计算图片实际显示尺寸（考虑 object-fit: contain 的效果）
       function getActualImageSize(img) {
         const rect = img.getBoundingClientRect();
         const containerWidth = rect.width;
         const containerHeight = rect.height;
-        const naturalWidth = img.naturalWidth || img.width;
-        const naturalHeight = img.naturalHeight || img.height;
 
-        if (!naturalWidth || !naturalHeight) {
-          // 如果图片还没加载，返回容器尺寸
-          return {
-            width: containerWidth,
-            height: containerHeight,
-            offsetX: 0,
-            offsetY: 0,
-          };
-        }
+        // 使用设备尺寸（稳定值），如果没有则使用默认值
+        const defaultSize = { width: 375, height: 812 };
+        const size = deviceSize || defaultSize;
+        const imageWidth = size.width;
+        const imageHeight = size.height;
 
         // 计算保持宽高比的实际显示尺寸
-        const imageAspect = naturalWidth / naturalHeight;
+        const imageAspect = imageWidth / imageHeight;
         const containerAspect = containerWidth / containerHeight;
 
         let actualWidth, actualHeight, offsetX, offsetY;
@@ -497,6 +500,11 @@
         return { width: actualWidth, height: actualHeight, offsetX, offsetY };
       }
 
+      // 限制坐标在有效范围内
+      function clampCoordinate(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+      }
+
       // 1. 鼠标按下
       screenImg.addEventListener("mousedown", (e) => {
         // 如果正在执行粘贴操作，禁止所有投屏操作
@@ -508,12 +516,27 @@
         isDragging = true;
         const rect = screenImg.getBoundingClientRect();
         const actualSize = getActualImageSize(screenImg);
+        // 保存视图尺寸，确保滑动时使用一致的尺寸
+        savedViewSize = {
+          width: actualSize.width,
+          height: actualSize.height,
+          offsetX: actualSize.offsetX,
+          offsetY: actualSize.offsetY,
+        };
         // 计算相对于实际图片内容的坐标
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
-        // 调整坐标，减去偏移量
-        startX = clickX - actualSize.offsetX;
-        startY = clickY - actualSize.offsetY;
+        // 调整坐标，减去偏移量，并限制在有效范围内
+        startX = clampCoordinate(
+          clickX - actualSize.offsetX,
+          0,
+          actualSize.width
+        );
+        startY = clampCoordinate(
+          clickY - actualSize.offsetY,
+          0,
+          actualSize.height
+        );
         // 记录按下时间
         startTime = new Date().getTime();
       });
@@ -530,15 +553,27 @@
         isDragging = false;
 
         const rect = screenImg.getBoundingClientRect();
-        const actualSize = getActualImageSize(screenImg);
+        // 使用保存的视图尺寸，确保滑动时使用一致的尺寸
+        const actualSize = savedViewSize || getActualImageSize(screenImg);
         // 计算相对于实际图片内容的坐标
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
-        const endX = clickX - actualSize.offsetX;
-        const endY = clickY - actualSize.offsetY;
+        // 调整坐标，减去偏移量，并限制在有效范围内
+        const endX = clampCoordinate(
+          clickX - actualSize.offsetX,
+          0,
+          actualSize.width
+        );
+        const endY = clampCoordinate(
+          clickY - actualSize.offsetY,
+          0,
+          actualSize.height
+        );
         // 使用实际图片显示尺寸
         const viewWidth = actualSize.width;
         const viewHeight = actualSize.height;
+        // 清除保存的视图尺寸
+        savedViewSize = null;
 
         // 计算耗时
         const endTime = new Date().getTime();
@@ -619,6 +654,7 @@
 
       screenImg.addEventListener("mouseleave", () => {
         isDragging = false;
+        savedViewSize = null; // 清除保存的视图尺寸
       });
 
       // 双击事件：触发长按
@@ -642,8 +678,17 @@
         // 计算相对于实际图片内容的坐标
         const clickX = e.clientX - rect.left;
         const clickY = e.clientY - rect.top;
-        const x = clickX - actualSize.offsetX;
-        const y = clickY - actualSize.offsetY;
+        // 调整坐标，减去偏移量，并限制在有效范围内
+        const x = clampCoordinate(
+          clickX - actualSize.offsetX,
+          0,
+          actualSize.width
+        );
+        const y = clampCoordinate(
+          clickY - actualSize.offsetY,
+          0,
+          actualSize.height
+        );
         // 使用实际图片显示尺寸
         const viewWidth = actualSize.width;
         const viewHeight = actualSize.height;

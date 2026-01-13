@@ -276,7 +276,7 @@
             // 使用当前页面的 hostname，支持外网访问
             const hostname = window.location.hostname;
             // 使用 dashboard 的设备控制页面，通过端口参数区分设备
-            const url = `/device?port=${device.web_port}`;
+            const url = `/device?port=${device.web_port}&name=${device.name}`;
             const wdaPort = device.wda_port; // WDA 端口
 
             const card = document.createElement("div");
