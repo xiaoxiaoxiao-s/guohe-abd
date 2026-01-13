@@ -565,6 +565,51 @@ app.post("/api/drag", async (req, res) => {
   }
 });
 
+app.post("/api/longpress", async (req, res) => {
+  res.json({ success: true }); // 立即返回
+
+  try {
+    const { x, y, viewWidth, viewHeight } = req.body;
+    let screen = _deviceSize || { width: 375, height: 812 };
+
+    // 即使没缓存，也不要 await getScreenSize() 阻塞，直接用默认值或异步去取
+    if (!_deviceSize) getScreenSize(); // 触发一次异步更新，这次先用默认的或旧的
+
+    const realX = Math.round((x / viewWidth) * screen.width);
+    const realY = Math.round((y / viewHeight) * screen.height);
+
+    const sid = _currentSessionId;
+    if (!sid) return;
+
+    console.log(`📌 [长按] (${realX}, ${realY})`);
+
+    // 长按操作：按下后保持 1500ms，然后松开
+    // 这样可以触发 iOS 的长按菜单（如粘贴菜单）
+    wdaClient
+      .post(`/session/${sid}/actions`, {
+        actions: [
+          {
+            type: "pointer",
+            id: "finger1",
+            parameters: { pointerType: "touch" },
+            actions: [
+              { type: "pointerMove", duration: 0, x: realX, y: realY },
+              { type: "pointerDown", button: 0 },
+              { type: "pause", duration: 1500 }, // 保持按下状态 1.5 秒
+              { type: "pointerUp", button: 0 },
+            ],
+          },
+        ],
+      })
+      .catch((e) => {
+        if (e.message.includes("session")) _currentSessionId = null;
+        console.warn("长按操作异常:", e.message);
+      });
+  } catch (e) {
+    console.error("Longpress logic error:", e.message);
+  }
+});
+
 app.post("/api/home", async (req, res) => {
   res.json({ success: true });
   try {
@@ -584,23 +629,16 @@ app.post("/api/clipboard", async (req, res) => {
       let sid = await getSessionId(); // 剪贴板需要确保 Session 可用
       const base64Content = Buffer.from(text).toString("base64");
 
-      try {
-        await wdaClient.post(`/session/${sid}/wda/setPasteboard`, {
-          content: base64Content,
-          contentType: "plaintext",
-          label: "RemoteCopy",
-        });
-      } catch (e) {
-        await wdaClient.post(`/session/${sid}/wda/apps/launch`, {
-          bundleId: "com.woodrain.xiao.xctrunner",
-        });
-        await sleep(1000);
-        await wdaClient.post(`/session/${sid}/wda/setPasteboard`, {
-          content: base64Content,
-          contentType: "plaintext",
-          label: "RemoteCopy",
-        });
-      }
+      await wdaClient.post(`/session/${sid}/wda/apps/launch`, {
+        bundleId: "com.woodrain.dekun.xctrunner",
+      });
+      await sleep(1000);
+      await wdaClient.post(`/session/${sid}/wda/setPasteboard`, {
+        content: base64Content,
+        contentType: "plaintext",
+        label: "RemoteCopy",
+      });
+
       await wdaClient.post(`/wda/homescreen`);
     } catch (e) {
       console.error("Clipboard bg error:", e.message);

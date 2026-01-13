@@ -32,7 +32,6 @@
         flex-direction: column;
         align-items: center;
         flex: 1;
-        max-width: 60%;
       }
 
       .right-panel {
@@ -40,7 +39,6 @@
         flex-direction: column;
         align-items: center;
         flex: 0 0 auto;
-        min-width: 300px;
       }
 
       .phone-wrapper {
@@ -227,7 +225,6 @@
         }
 
         .right-panel {
-          min-width: 100%;
           margin-top: 20px;
         }
 
@@ -235,10 +232,6 @@
           flex-direction: row;
           flex-wrap: wrap;
           justify-content: center;
-        }
-
-        .control-section {
-          min-width: 200px;
         }
 
         .phone-wrapper {
@@ -316,7 +309,7 @@
           border-left: 3px solid #4caf50;
         "
       >
-        💡 操作提示：双击屏幕表示长按操作
+        💡 操作提示：长按屏幕（超过1.5秒）表示长按操作
       </div>
     </div>
 
@@ -444,8 +437,7 @@
       screenImg.src = `${API_BASE}/api/stream`;
 
       screenImg.onload = () => {
-        statusText.innerText =
-          "✅ 在线 | 单击 / 双击长按 / 快速滑动 / 慢速拖拽";
+        statusText.innerText = "✅ 在线 | 单击 / 长按 / 快速滑动 / 慢速拖拽";
         statusText.style.color = "#4caf50";
       };
       screenImg.onerror = () => {
@@ -460,8 +452,6 @@
         startY = 0;
       let startTime = 0;
       let isDragging = false;
-      let isDoubleClick = false; // 标记是否为双击
-      let clickTimer = null; // 单击延迟定时器
       let isClipboardOperationInProgress = false; // 标记粘贴操作是否正在进行
       let savedViewSize = null; // 保存按下时的视图尺寸，确保滑动时使用一致的尺寸
 
@@ -601,23 +591,14 @@
               viewHeight,
             });
           } else {
-            // 单击处理：延迟执行，如果检测到双击则取消
-            if (clickTimer) {
-              clearTimeout(clickTimer);
-            }
-            clickTimer = setTimeout(() => {
-              // 检查是否刚刚发生了双击
-              if (!isDoubleClick) {
-                console.log("👆 触发点击");
-                performAction("/api/tap", {
-                  x: endX,
-                  y: endY,
-                  viewWidth,
-                  viewHeight,
-                });
-              }
-              clickTimer = null;
-            }, 300); // 300ms延迟，等待双击事件
+            // 单击处理
+            console.log("👆 触发点击");
+            performAction("/api/tap", {
+              x: endX,
+              y: endY,
+              viewWidth,
+              viewHeight,
+            });
           }
           return;
         }
@@ -655,59 +636,6 @@
       screenImg.addEventListener("mouseleave", () => {
         isDragging = false;
         savedViewSize = null; // 清除保存的视图尺寸
-      });
-
-      // 双击事件：触发长按
-      screenImg.addEventListener("dblclick", (e) => {
-        // 如果正在执行粘贴操作，禁止所有投屏操作
-        if (isClipboardOperationInProgress) {
-          e.preventDefault();
-          return;
-        }
-        e.preventDefault();
-        isDoubleClick = true; // 标记为双击，防止触发单击
-
-        // 清除可能存在的单击定时器
-        if (clickTimer) {
-          clearTimeout(clickTimer);
-          clickTimer = null;
-        }
-
-        const rect = screenImg.getBoundingClientRect();
-        const actualSize = getActualImageSize(screenImg);
-        // 计算相对于实际图片内容的坐标
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
-        // 调整坐标，减去偏移量，并限制在有效范围内
-        const x = clampCoordinate(
-          clickX - actualSize.offsetX,
-          0,
-          actualSize.width
-        );
-        const y = clampCoordinate(
-          clickY - actualSize.offsetY,
-          0,
-          actualSize.height
-        );
-        // 使用实际图片显示尺寸
-        const viewWidth = actualSize.width;
-        const viewHeight = actualSize.height;
-
-        console.log("📌 双击触发长按");
-        statusText.innerText = "📌 执行长按操作...";
-        setTimeout(() => (statusText.innerText = "✅ 在线"), 2000);
-
-        performAction("/api/longpress", {
-          x: x,
-          y: y,
-          viewWidth,
-          viewHeight,
-        });
-
-        // 300ms后重置双击标记
-        setTimeout(() => {
-          isDoubleClick = false;
-        }, 300);
       });
 
       // 优化：使用 fire-and-forget 模式，不等待响应

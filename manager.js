@@ -11,6 +11,51 @@ const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 if (!fs.existsSync(config.log_dir)) fs.mkdirSync(config.log_dir);
 if (!fs.existsSync(config.pid_dir)) fs.mkdirSync(config.pid_dir);
 
+// === 辅助函数：检查进程是否真的在运行 ===
+function isProcessRunning(pid) {
+  try {
+    // 发送信号 0 来检查进程是否存在（不会实际终止进程）
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// === 辅助函数：清理无效的 PID 文件 ===
+function cleanupStalePidFile(pidPath, processName) {
+  if (!fs.existsSync(pidPath)) {
+    return false;
+  }
+
+  try {
+    const pid = parseInt(fs.readFileSync(pidPath, "utf8").trim());
+    if (!isProcessRunning(pid)) {
+      console.log(
+        `    [!] 清理无效的 PID 文件: ${processName} (PID ${pid} 已不存在)`
+      );
+      fs.unlinkSync(pidPath);
+      return true;
+    }
+  } catch (e) {
+    // 如果读取失败，也清理掉
+    console.log(`    [!] 清理损坏的 PID 文件: ${processName}`);
+    fs.unlinkSync(pidPath);
+    return true;
+  }
+
+  return false;
+}
+
+// === 辅助函数：检查端口是否被占用 ===
+function isPortInUse(port) {
+  return new Promise((resolve) => {
+    exec(`lsof -ti :${port}`, (error) => {
+      resolve(!error); // 如果命令成功（找到进程），说明端口被占用
+    });
+  });
+}
+
 // === 辅助函数：启动单个后台进程 ===
 function spawnProcess(cmd, name, type) {
   return new Promise((resolve, reject) => {
@@ -148,16 +193,69 @@ async function startAll(enableCpolar = false) {
 
     const logBase = path.join(config.log_dir, device.name);
 
-    // 检查是否已运行 (简单检查其中一个pid文件)
-    if (fs.existsSync(path.join(config.pid_dir, `${device.name}_wda.pid`))) {
-      console.log(`[!] ${device.name} 似乎已在运行，请先 stop。`);
-      continue;
-    }
-
     // 计算端口
     const WDA_PORT = device.local_port;
     const MJPEG_PORT = device.local_port + 1;
     const WEB_PORT = device.local_port + 2;
+
+    // 检查是否已运行 (检查所有相关的 pid 文件，并验证进程是否真的在运行)
+    const serverPidPath = path.join(
+      config.pid_dir,
+      `${device.name}_server.pid`
+    );
+    const iproxyCtrlPidPath = path.join(
+      config.pid_dir,
+      `${device.name}_iproxy_ctrl.pid`
+    );
+    const iproxyMjpegPidPath = path.join(
+      config.pid_dir,
+      `${device.name}_iproxy_mjpeg.pid`
+    );
+
+    // 清理无效的 PID 文件
+    cleanupStalePidFile(serverPidPath, `${device.name}_server`);
+    cleanupStalePidFile(iproxyCtrlPidPath, `${device.name}_iproxy_ctrl`);
+    cleanupStalePidFile(iproxyMjpegPidPath, `${device.name}_iproxy_mjpeg`);
+
+    // 检查端口是否被占用（即使 PID 文件不存在）
+    const webPortInUse = await isPortInUse(WEB_PORT);
+    const wdaPortInUse = await isPortInUse(WDA_PORT);
+    const mjpegPortInUse = await isPortInUse(MJPEG_PORT);
+
+    // 检查是否有任何相关进程在运行（PID 文件存在且进程在运行）
+    const serverRunning = fs.existsSync(serverPidPath);
+    const iproxyCtrlRunning = fs.existsSync(iproxyCtrlPidPath);
+    const iproxyMjpegRunning = fs.existsSync(iproxyMjpegPidPath);
+
+    if (
+      serverRunning ||
+      iproxyCtrlRunning ||
+      iproxyMjpegRunning ||
+      webPortInUse ||
+      wdaPortInUse ||
+      mjpegPortInUse
+    ) {
+      console.log(`[!] ${device.name} 似乎已在运行，请先 stop。`);
+      if (serverRunning) {
+        console.log(`    检测到进程文件: ${device.name}_server.pid`);
+      }
+      if (iproxyCtrlRunning) {
+        console.log(`    检测到进程文件: ${device.name}_iproxy_ctrl.pid`);
+      }
+      if (iproxyMjpegRunning) {
+        console.log(`    检测到进程文件: ${device.name}_iproxy_mjpeg.pid`);
+      }
+      if (webPortInUse) {
+        console.log(`    端口 ${WEB_PORT} 已被占用`);
+      }
+      if (wdaPortInUse) {
+        console.log(`    端口 ${WDA_PORT} 已被占用`);
+      }
+      if (mjpegPortInUse) {
+        console.log(`    端口 ${MJPEG_PORT} 已被占用`);
+      }
+      continue;
+    }
 
     const localIP = getLocalIP();
     console.log(`\n[+] 启动设备组: ${device.name}`);
