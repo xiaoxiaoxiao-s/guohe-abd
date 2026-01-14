@@ -87,6 +87,49 @@ function isPortInUse(port) {
   });
 }
 
+// === 辅助函数：检查设备是否真的连接 ===
+function isDeviceConnected(udid) {
+  return new Promise((resolve) => {
+    exec(`idevice_id -l`, (error, stdout) => {
+      if (error) {
+        // 如果 idevice_id 命令失败，假设设备未连接
+        resolve(false);
+        return;
+      }
+      // 检查 UDID 是否在连接的设备列表中
+      const connectedDevices = stdout.trim().split("\n");
+      resolve(connectedDevices.includes(udid));
+    });
+  });
+}
+
+// === 辅助函数：清理设备的所有进程 ===
+async function cleanupDeviceProcesses(deviceName, pidDir) {
+  const processTypes = ["iproxy_ctrl", "iproxy_mjpeg", "wda", "server"];
+  let cleanedCount = 0;
+
+  for (const type of processTypes) {
+    const pidFile = path.join(__dirname, pidDir, `${deviceName}_${type}.pid`);
+    if (fs.existsSync(pidFile)) {
+      try {
+        const pid = fs.readFileSync(pidFile, "utf8").trim();
+        process.kill(pid, "SIGTERM");
+        fs.unlinkSync(pidFile);
+        cleanedCount++;
+        console.log(`    [!] 已清理 ${deviceName}_${type} (PID: ${pid})`);
+      } catch (e) {
+        // 忽略进程不存在的错误
+        if (fs.existsSync(pidFile)) {
+          fs.unlinkSync(pidFile);
+          cleanedCount++;
+        }
+      }
+    }
+  }
+
+  return cleanedCount;
+}
+
 // API: 获取配置列表（供 dashboard 使用）
 app.get("/api/config", (req, res) => {
   try {
@@ -235,6 +278,43 @@ app.post("/api/device/start", async (req, res) => {
     cleanupStalePidFile(iproxyCtrlPidPath, `${deviceName}_iproxy_ctrl`);
     cleanupStalePidFile(iproxyMjpegPidPath, `${deviceName}_iproxy_mjpeg`);
 
+    // 检查设备是否真的连接（如果设备断开，应该清理所有进程）
+    const deviceConnected = await isDeviceConnected(device.udid);
+    if (!deviceConnected) {
+      console.log(
+        `    [!] 设备 ${deviceName} (UDID: ${device.udid}) 未连接，强制清理所有残留进程...`
+      );
+      const cleanedCount = await cleanupDeviceProcesses(deviceName, pidDir);
+
+      // 强制清理占用端口的进程
+      if (await isPortInUse(WDA_PORT)) {
+        exec(`lsof -ti :${WDA_PORT} | xargs kill -9 2>/dev/null || true`);
+      }
+      if (await isPortInUse(MJPEG_PORT)) {
+        exec(`lsof -ti :${MJPEG_PORT} | xargs kill -9 2>/dev/null || true`);
+      }
+      if (await isPortInUse(WEB_PORT)) {
+        exec(`lsof -ti :${WEB_PORT} | xargs kill -9 2>/dev/null || true`);
+      }
+
+      // 等待端口释放
+      let retries = 20;
+      while (
+        retries > 0 &&
+        ((await isPortInUse(WDA_PORT)) ||
+          (await isPortInUse(MJPEG_PORT)) ||
+          (await isPortInUse(WEB_PORT)))
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        retries--;
+      }
+
+      console.log(
+        `    [!] 已清理 ${cleanedCount} 个残留进程，设备可以重新启动`
+      );
+      // 继续启动流程，不返回错误
+    }
+
     // 检查端口是否被占用（即使 PID 文件不存在）
     const webPortInUse = await isPortInUse(WEB_PORT);
     const wdaPortInUse = await isPortInUse(WDA_PORT);
@@ -251,7 +331,8 @@ app.post("/api/device/start", async (req, res) => {
     const criticalProcessRunning = serverRunning || wdaRunning;
 
     // 如果关键进程在运行，或者 web 端口被占用（说明 server 在运行），阻止启动
-    if (criticalProcessRunning || webPortInUse) {
+    // 但如果设备未连接，我们已经清理了所有进程，所以这里不应该阻止
+    if (deviceConnected && (criticalProcessRunning || webPortInUse)) {
       const issues = [];
       if (serverRunning) issues.push(`进程文件: ${deviceName}_server.pid`);
       if (wdaRunning) issues.push(`进程文件: ${deviceName}_wda.pid`);
