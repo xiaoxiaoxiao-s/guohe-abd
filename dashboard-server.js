@@ -445,6 +445,116 @@ app.post("/api/device/start", async (req, res) => {
   }
 });
 
+// API: 重新连接设备（不验证，直接关闭所有进程并重新启动）
+app.post("/api/device/reconnect", async (req, res) => {
+  try {
+    const { deviceName } = req.body;
+
+    if (!deviceName) {
+      return res.status(400).json({ error: "缺少设备名称" });
+    }
+
+    const config = getConfig();
+    const device = config.devices.find((d) => d.name === deviceName);
+
+    if (!device) {
+      return res.status(404).json({ error: "设备不存在" });
+    }
+
+    if (!device.enable) {
+      return res.status(400).json({ error: "设备未启用" });
+    }
+
+    const pidDir = config.pid_dir || "./pids";
+
+    // 计算端口
+    const WDA_PORT = device.local_port;
+    const MJPEG_PORT = device.local_port + 1;
+    const WEB_PORT = device.local_port + 2;
+
+    console.log(`\n[🔄] 重新连接设备: ${deviceName}`);
+    console.log(`    [!] 正在关闭所有进程...`);
+
+    // 1. 清理所有进程（不验证，直接清理）
+    const cleanedCount = await cleanupDeviceProcesses(deviceName, pidDir);
+
+    // 2. 强制清理占用端口的进程
+    if (await isPortInUse(WDA_PORT)) {
+      exec(`lsof -ti :${WDA_PORT} | xargs kill -9 2>/dev/null || true`);
+    }
+    if (await isPortInUse(MJPEG_PORT)) {
+      exec(`lsof -ti :${MJPEG_PORT} | xargs kill -9 2>/dev/null || true`);
+    }
+    if (await isPortInUse(WEB_PORT)) {
+      exec(`lsof -ti :${WEB_PORT} | xargs kill -9 2>/dev/null || true`);
+    }
+
+    // 3. 等待端口释放（最多等待 3 秒）
+    let retries = 30;
+    while (
+      retries > 0 &&
+      ((await isPortInUse(WDA_PORT)) ||
+        (await isPortInUse(MJPEG_PORT)) ||
+        (await isPortInUse(WEB_PORT)))
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      retries--;
+    }
+
+    console.log(`    [!] 已清理 ${cleanedCount} 个进程，端口已释放`);
+
+    // 4. 确保目录存在
+    if (!fs.existsSync(path.join(__dirname, config.log_dir))) {
+      fs.mkdirSync(path.join(__dirname, config.log_dir), { recursive: true });
+    }
+    if (!fs.existsSync(path.join(__dirname, pidDir))) {
+      fs.mkdirSync(path.join(__dirname, pidDir), { recursive: true });
+    }
+
+    const logBase = path.join(__dirname, config.log_dir, deviceName);
+
+    console.log(`    [+] 正在重新启动所有进程...`);
+    console.log(`    WDA 控制端口: ${WDA_PORT}`);
+    console.log(`    视频流端口: ${MJPEG_PORT}`);
+    console.log(`    Web 访问端口: ${WEB_PORT}`);
+
+    // 5. 重新启动所有进程
+    // 1. 启动 iproxy (控制端口)
+    const iproxyCtrlCmd = `nohup iproxy ${WDA_PORT} 8100 -u ${device.udid} > "${logBase}_iproxy_ctrl.log" 2>&1 & echo $!`;
+    await spawnProcess(iproxyCtrlCmd, deviceName, "iproxy_ctrl", config);
+
+    // 2. 启动 iproxy (视频端口)
+    const iproxyMjpegCmd = `nohup iproxy ${MJPEG_PORT} 9100 -u ${device.udid} > "${logBase}_iproxy_mjpeg.log" 2>&1 & echo $!`;
+    await spawnProcess(iproxyMjpegCmd, deviceName, "iproxy_mjpeg", config);
+
+    // 3. 启动 xcodebuild (WDA 服务)
+    const wdaCmd = `nohup xcodebuild -project "${config.project_path}" \
+      -scheme "${config.scheme}" \
+      -destination "platform=iOS,id=${device.udid}" \
+      -allowProvisioningUpdates \
+      test > "${logBase}_wda.log" 2>&1 & echo $!`;
+    await spawnProcess(wdaCmd, deviceName, "wda", config);
+
+    // 4. 启动 Node.js Web 服务器
+    const serverCmd = `nohup env PORT=${WEB_PORT} WDA_PORT=${WDA_PORT} MJPEG_PORT=${MJPEG_PORT} node "${path.join(
+      __dirname,
+      "server.js"
+    )}" > "${logBase}_server.log" 2>&1 & echo $!`;
+    await spawnProcess(serverCmd, deviceName, "server", config);
+
+    console.log(`    [✅] 设备 ${deviceName} 重新连接完成`);
+
+    res.json({
+      success: true,
+      message: `设备 ${deviceName} 已重新连接，请等待约 10-30 秒让 WDA 初始化`,
+      webPort: WEB_PORT,
+    });
+  } catch (error) {
+    console.error("重新连接设备失败:", error.message);
+    res.status(500).json({ error: "重新连接设备失败", message: error.message });
+  }
+});
+
 // 设备控制页面路由（通过端口参数区分设备）
 app.get("/device", (req, res) => {
   const port = req.query.port;

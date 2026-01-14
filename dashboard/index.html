@@ -514,7 +514,7 @@
         button.innerText = "连接中...";
 
         try {
-          const response = await fetch("/api/device/start", {
+          const response = await fetch("/api/device/reconnect", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
