@@ -274,12 +274,12 @@ async function startAll(enableCpolar = false) {
     await spawnProcess(iproxyMjpegCmd, device.name, "iproxy_mjpeg");
 
     // 3. 启动 xcodebuild (WDA 服务) - 已禁用
-    // const wdaCmd = `nohup xcodebuild -project "${config.project_path}" \
-    // -scheme "${config.scheme}" \
-    // -destination "platform=iOS,id=${device.udid}" \
-    // -allowProvisioningUpdates \
-    // test > "${logBase}_wda.log" 2>&1 & echo $!`;
-    // await spawnProcess(wdaCmd, device.name, "wda");
+    const wdaCmd = `nohup xcodebuild -project "${config.project_path}" \
+    -scheme "${config.scheme}" \
+    -destination "platform=iOS,id=${device.udid}" \
+    -allowProvisioningUpdates \
+    test > "${logBase}_wda.log" 2>&1 & echo $!`;
+    await spawnProcess(wdaCmd, device.name, "wda");
 
     // 4. 启动 Node.js Web 服务器
     const serverCmd = `nohup env PORT=${WEB_PORT} WDA_PORT=${WDA_PORT} MJPEG_PORT=${MJPEG_PORT} node "${path.join(

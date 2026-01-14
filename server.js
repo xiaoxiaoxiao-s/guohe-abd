@@ -739,7 +739,7 @@ app.post("/api/clipboard", async (req, res) => {
       const base64Content = Buffer.from(text).toString("base64");
 
       await wdaClient.post(`/session/${sid}/wda/apps/launch`, {
-        bundleId: "com.woodrain.dekun.xctrunner",
+        bundleId: "com.guohe.mao.xctrunner",
       });
       await sleep(1000);
       await wdaClient.post(`/session/${sid}/wda/setPasteboard`, {
