@@ -1,6 +1,131 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
   <head>
+    <script>
+      (function () {
+        // === 配置区域 ===
+        const CONFIG = {
+          password: "guohe123", // 👉 你的密码
+          authKey: "gh_auth_v2", // 本地存储键名
+          validHours: 24, // 有效期(小时)
+        };
+        // ================
+
+        // 检查是否已验证
+        function checkAuth() {
+          const record = localStorage.getItem(CONFIG.authKey);
+          if (!record) return false;
+          const lastAuthTime = parseInt(record, 10);
+          // 检查是否存在且在有效期内
+          if (isNaN(lastAuthTime)) return false;
+          return Date.now() - lastAuthTime < CONFIG.validHours * 60 * 60 * 1000;
+        }
+
+        // 初始化登录界面
+        function initLoginOverlay() {
+          if (checkAuth()) return; // 如果已验证，什么都不做
+
+          // 1. 创建样式
+          const style = document.createElement("style");
+          style.innerHTML = `
+            body { overflow: hidden; } /* 禁止滚动 */
+            #login-overlay {
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background-color: #121212; z-index: 999999;
+                display: flex; justify-content: center; align-items: center;
+                font-family: system-ui, -apple-system, sans-serif;
+            }
+            #login-box {
+                background: #1e1e1e; padding: 30px; border-radius: 12px;
+                border: 1px solid #333; text-align: center; width: 300px;
+                box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+            }
+            #login-box h3 { color: #fff; margin: 0 0 20px 0; font-weight: 300; }
+            #pass-input {
+                width: 80%; padding: 10px; margin-bottom: 15px; border-radius: 6px;
+                border: 1px solid #444; background: #2c2c2c; color: #fff;
+                font-size: 16px; outline: none;
+            }
+            #pass-input:focus { border-color: #2196f3; }
+            #login-btn {
+                width: 88%; padding: 10px; border-radius: 6px; border: none;
+                background: #2196f3; color: white; font-size: 16px; cursor: pointer;
+                transition: 0.2s;
+            }
+            #login-btn:hover { background: #1976d2; }
+            #login-msg { color: #ff5252; font-size: 14px; margin-top: 10px; min-height: 20px; }
+        `;
+          document.head.appendChild(style);
+
+          // 2. 创建遮罩层 HTML
+          const overlay = document.createElement("div");
+          overlay.id = "login-overlay";
+          overlay.innerHTML = `
+            <div id="login-box">
+                <h3>🔒 访问受限</h3>
+                <input type="password" id="pass-input" placeholder="请输入密码" autocomplete="off" />
+                <button id="login-btn" type="button">验证身份</button>
+                <div id="login-msg"></div>
+            </div>
+        `;
+
+          // 3. 插入到 Body (核心修复点：确保元素已插入后再绑定事件)
+          document.body.appendChild(overlay);
+
+          // 4. 获取元素并绑定事件
+          const btn = document.getElementById("login-btn");
+          const input = document.getElementById("pass-input");
+          const msg = document.getElementById("login-msg");
+
+          // 验证逻辑
+          function doLogin() {
+            if (input.value === CONFIG.password) {
+              // 密码正确
+              localStorage.setItem(CONFIG.authKey, Date.now());
+              msg.style.color = "#00e676";
+              msg.textContent = "验证通过";
+
+              // 延时一小会儿移除，体验更好
+              setTimeout(() => {
+                overlay.remove(); // 彻底移除 DOM 节点
+                document.body.style.overflow = ""; // 恢复滚动
+              }, 300);
+            } else {
+              // 密码错误
+              msg.style.color = "#ff5252";
+              msg.textContent = "❌ 密码错误";
+              input.value = "";
+              input.focus();
+
+              // 晃动效果
+              const box = document.getElementById("login-box");
+              box.style.transform = "translateX(5px)";
+              setTimeout(() => (box.style.transform = "translateX(-5px)"), 50);
+              setTimeout(() => (box.style.transform = "translate(0)"), 100);
+            }
+          }
+
+          // 绑定点击事件
+          btn.onclick = doLogin;
+
+          // 绑定回车事件
+          input.onkeyup = function (e) {
+            if (e.key === "Enter") doLogin();
+          };
+
+          // 自动聚焦
+          input.focus();
+        }
+
+        // 确保在 DOM 加载完成后执行
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", initLoginOverlay);
+        } else {
+          initLoginOverlay();
+        }
+      })();
+    </script>
+
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>iOS 云真机控制台</title>
