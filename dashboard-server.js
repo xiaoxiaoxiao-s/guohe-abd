@@ -217,6 +217,7 @@ app.post("/api/device/start", async (req, res) => {
       pidDir,
       `${deviceName}_server.pid`
     );
+    const wdaPidPath = path.join(__dirname, pidDir, `${deviceName}_wda.pid`);
     const iproxyCtrlPidPath = path.join(
       __dirname,
       pidDir,
@@ -230,6 +231,7 @@ app.post("/api/device/start", async (req, res) => {
 
     // 清理无效的 PID 文件
     cleanupStalePidFile(serverPidPath, `${deviceName}_server`);
+    cleanupStalePidFile(wdaPidPath, `${deviceName}_wda`);
     cleanupStalePidFile(iproxyCtrlPidPath, `${deviceName}_iproxy_ctrl`);
     cleanupStalePidFile(iproxyMjpegPidPath, `${deviceName}_iproxy_mjpeg`);
 
@@ -240,32 +242,77 @@ app.post("/api/device/start", async (req, res) => {
 
     // 检查是否有任何相关进程在运行（PID 文件存在且进程在运行）
     const serverRunning = fs.existsSync(serverPidPath);
+    const wdaRunning = fs.existsSync(wdaPidPath);
     const iproxyCtrlRunning = fs.existsSync(iproxyCtrlPidPath);
     const iproxyMjpegRunning = fs.existsSync(iproxyMjpegPidPath);
 
-    if (
-      serverRunning ||
-      iproxyCtrlRunning ||
-      iproxyMjpegRunning ||
-      webPortInUse ||
-      wdaPortInUse ||
-      mjpegPortInUse
-    ) {
+    // 关键进程检查：只有当 wda 和 server 都在运行时，才阻止启动
+    // 如果只有 iproxy 在运行（说明 xcode 启动失败），允许重新启动
+    const criticalProcessRunning = serverRunning || wdaRunning;
+
+    // 如果关键进程在运行，或者 web 端口被占用（说明 server 在运行），阻止启动
+    if (criticalProcessRunning || webPortInUse) {
       const issues = [];
       if (serverRunning) issues.push(`进程文件: ${deviceName}_server.pid`);
-      if (iproxyCtrlRunning)
-        issues.push(`进程文件: ${deviceName}_iproxy_ctrl.pid`);
-      if (iproxyMjpegRunning)
-        issues.push(`进程文件: ${deviceName}_iproxy_mjpeg.pid`);
+      if (wdaRunning) issues.push(`进程文件: ${deviceName}_wda.pid`);
       if (webPortInUse) issues.push(`端口 ${WEB_PORT} 已被占用`);
-      if (wdaPortInUse) issues.push(`端口 ${WDA_PORT} 已被占用`);
-      if (mjpegPortInUse) issues.push(`端口 ${MJPEG_PORT} 已被占用`);
 
       return res.status(400).json({
         error: "设备已在运行中",
-        message: "检测到相关进程正在运行或端口被占用，请先停止设备",
+        message: "检测到关键进程正在运行或端口被占用，请先停止设备",
         issues: issues,
       });
+    }
+
+    // 如果只有 iproxy 在运行（xcode 启动失败的情况），清理 iproxy 进程以便重新启动
+    if (
+      iproxyCtrlRunning ||
+      iproxyMjpegRunning ||
+      wdaPortInUse ||
+      mjpegPortInUse
+    ) {
+      console.log(`    [!] 检测到残留的 iproxy 进程，正在清理...`);
+
+      // 清理 iproxy 进程
+      if (iproxyCtrlRunning) {
+        try {
+          const pid = fs.readFileSync(iproxyCtrlPidPath, "utf8").trim();
+          process.kill(pid, "SIGTERM");
+          fs.unlinkSync(iproxyCtrlPidPath);
+          console.log(`    [!] 已清理 ${deviceName}_iproxy_ctrl (PID: ${pid})`);
+        } catch (e) {
+          if (fs.existsSync(iproxyCtrlPidPath)) {
+            fs.unlinkSync(iproxyCtrlPidPath);
+          }
+        }
+      }
+
+      if (iproxyMjpegRunning) {
+        try {
+          const pid = fs.readFileSync(iproxyMjpegPidPath, "utf8").trim();
+          process.kill(pid, "SIGTERM");
+          fs.unlinkSync(iproxyMjpegPidPath);
+          console.log(
+            `    [!] 已清理 ${deviceName}_iproxy_mjpeg (PID: ${pid})`
+          );
+        } catch (e) {
+          if (fs.existsSync(iproxyMjpegPidPath)) {
+            fs.unlinkSync(iproxyMjpegPidPath);
+          }
+        }
+      }
+
+      // 等待端口释放（最多等待 2 秒）
+      let retries = 20;
+      while (
+        retries > 0 &&
+        ((await isPortInUse(WDA_PORT)) || (await isPortInUse(MJPEG_PORT)))
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        retries--;
+      }
+
+      console.log(`    [!] iproxy 清理完成，继续启动流程`);
     }
 
     // 确保目录存在
