@@ -496,6 +496,17 @@
           stopBtn.style.color = "";
           stopBtn.style.borderColor = "";
         }
+
+        // 如果重新连接按钮处于启动中状态，恢复它
+        const reconnectBtn = card.querySelector(".reconnect-btn");
+        if (reconnectBtn && card.hasAttribute("data-starting")) {
+          card.removeAttribute("data-starting");
+          reconnectBtn.disabled = false;
+          reconnectBtn.innerText = "重新连接";
+          reconnectBtn.style.background = "";
+          reconnectBtn.style.color = "";
+          reconnectBtn.style.borderColor = "";
+        }
       }
 
       // 标记为离线
@@ -509,9 +520,17 @@
 
       // 重新连接设备
       async function reconnectDevice(deviceName, button) {
+        // 如果按钮已禁用（正在启动中），直接返回
+        if (button.disabled) {
+          return;
+        }
+
         // 禁用按钮，显示加载状态
         button.disabled = true;
         button.innerText = "连接中...";
+        button.style.background = "rgba(255, 193, 7, 0.1)";
+        button.style.color = "var(--warning)";
+        button.style.borderColor = "var(--warning)";
 
         try {
           const response = await fetch("/api/device/reconnect", {
@@ -525,7 +544,7 @@
           const data = await response.json();
 
           if (response.ok && data.success) {
-            button.innerText = "已启动";
+            button.innerText = "启动中...";
             button.style.background = "rgba(0, 230, 118, 0.1)";
             button.style.color = "var(--success)";
             button.style.borderColor = "var(--success)";
@@ -533,6 +552,9 @@
             // 找到对应的卡片
             const card = button.closest(".card");
             if (card) {
+              // 标记按钮为启动中状态，存储在卡片上
+              card.setAttribute("data-starting", "true");
+
               // 更新状态为"启动中"
               const badge = card.querySelector(".status-badge");
               badge.querySelector(".text").innerText = "启动中，请稍候...";
@@ -547,22 +569,33 @@
                   const checkInterval = setInterval(() => {
                     checkCount++;
                     checkDeviceHealth(parseInt(wdaPort), card);
-                    if (card.classList.contains("online") || checkCount >= 6) {
+
+                    // 如果设备上线或检查超时，恢复按钮
+                    if (card.classList.contains("online")) {
                       clearInterval(checkInterval);
+                      // 设备已上线，恢复按钮
+                      card.removeAttribute("data-starting");
+                      button.disabled = false;
+                      button.innerText = "重新连接";
+                      button.style.background = "";
+                      button.style.color = "";
+                      button.style.borderColor = "";
+                    } else if (checkCount >= 6) {
+                      // 检查超时，恢复按钮以便重试
+                      clearInterval(checkInterval);
+                      card.removeAttribute("data-starting");
+                      button.disabled = false;
+                      button.innerText = "重新连接";
+                      button.style.background = "";
+                      button.style.color = "";
+                      button.style.borderColor = "";
+                      badge.querySelector(".text").innerText =
+                        "启动超时，请重试";
                     }
                   }, 5000);
                 }
               }, 5000);
             }
-
-            // 3秒后恢复按钮
-            setTimeout(() => {
-              button.disabled = false;
-              button.innerText = "重新连接";
-              button.style.background = "";
-              button.style.color = "";
-              button.style.borderColor = "";
-            }, 3000);
           } else {
             throw new Error(data.error || "启动设备失败");
           }
@@ -570,10 +603,21 @@
           console.error("启动设备失败:", error);
           button.innerText = "启动失败";
           button.style.background = "rgba(255, 82, 82, 0.2)";
+          button.style.color = "var(--error)";
+          button.style.borderColor = "var(--error)";
+
+          // 清除启动中标记
+          const card = button.closest(".card");
+          if (card) {
+            card.removeAttribute("data-starting");
+          }
+
           setTimeout(() => {
             button.disabled = false;
             button.innerText = "重新连接";
             button.style.background = "";
+            button.style.color = "";
+            button.style.borderColor = "";
           }, 2000);
           alert(`启动设备失败: ${error.message}`);
         }
